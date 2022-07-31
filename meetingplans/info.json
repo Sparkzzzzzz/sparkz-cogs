@@ -11,7 +11,7 @@
     "tags": [
         "Metting Plans"
     ],
-    "min_bot_version": "1.0",
+    "min_bot_version": "1.0.0",
     "hidden": false,
     "disabled": false,
     "type": "COG"
