@@ -1,4 +1,5 @@
 from .meetingplans import MeetingPlans
+from discord import discord
 
 
 def setup(bot):
