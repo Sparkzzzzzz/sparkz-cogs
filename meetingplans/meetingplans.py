@@ -1,5 +1,5 @@
 from redbot.core import commands
-from discord import discord
+import discord
 
 class MeetingPlans(commands.Cog):
     """Purges the meeting plans channel!"""
