@@ -1,5 +1,5 @@
-from redbot.core import commands
 import discord
+from redbot.core import commands
 
 class MeetingPlans(commands.Cog):
     """Purges the meeting plans channel!"""
@@ -11,7 +11,6 @@ class MeetingPlans(commands.Cog):
     async def mycom(self, ctx):
         """Purges the meeting plans channel!"""
         
-        from discord import discord
         @client.event
         async def on_message(message):
           if not message.content == ":AnnoyingMiddleFinger:":
