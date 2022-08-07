@@ -1,4 +1,4 @@
-from urllib import request
+import requests
 import discord
 from discord import client
 from redbot.core import commands
@@ -18,6 +18,6 @@ class Topic(commands.Cog):
 	      "X-RapidAPI-Host": "conversation-starter1.p.rapidapi.com"
                   }
 
-        response = request.request("GET", url, headers=headers)
+        response = requests.request("GET", url, headers=headers)
         print(response.text)
         
