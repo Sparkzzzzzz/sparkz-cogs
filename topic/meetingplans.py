@@ -1,4 +1,3 @@
-from asyncio.streams import _ClientConnectedCallback
 import discord
 from redbot.core import commands
 
@@ -9,10 +8,10 @@ class MeetingPlans(commands.Cog):
         self.bot = bot
 
     @commands.command()
-    async def info(self, ctx):
+    async def mycom(self, ctx):
         """Purges the meeting plans channel!"""
         
-        @_ClientConnectedCallback.event
+        @client.event
         async def on_message(message):
           if not message.content == ":AnnoyingMiddleFinger:":
             await message.delete()
