@@ -1,15 +1,16 @@
 import discord
+from discord import client
 from redbot.core import commands
 
-class MeetingPlans(commands.Cog):
-    """Purges the meeting plans channel!"""
+class Topic(commands.Cog):
+    """Sends a random conversation initiating topic when invoked!"""
 
     def __init__(self, bot):
         self.bot = bot
 
     @commands.command()
-    async def mycom(self, ctx):
-        """Purges the meeting plans channel!"""
+    async def topic(self, ctx):
+        """Sends a random conversation initiating topic when invoked!!"""
         
         @client.event
         async def on_message(message):
