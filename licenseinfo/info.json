@@ -1,0 +1,19 @@
+{
+    "name": "LicenseInfo",
+    "short": "Modifies the core licenseinfo command",
+    "description": "Self explainatory!",
+    "end_user_data_statement": "This cog does not persistently store any data or metadata about users.",
+    "install_msg": "Thanks for installing! Have fun Sparkz!",
+    "author": [
+        "Sparkz"  
+    ],
+    "required_cogs": {},
+    "tags": [
+        "License",
+        "LicenseInfo"
+    ],
+    "min_bot_version": "1.0.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
+}
