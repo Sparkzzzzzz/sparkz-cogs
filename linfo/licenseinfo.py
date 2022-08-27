@@ -4,7 +4,7 @@ from discord import client
 from redbot.core import commands
 
 class LicenseInfo(commands.Cog):
-    """Modifies the core licenseinfo command"""
+    """Modifies the core licenseinfo command!"""
 
     def __init__(self, bot):
         self.bot = bot
