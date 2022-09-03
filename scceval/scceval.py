@@ -1,4 +1,3 @@
-import requests
 import discord
 from discord import client
 from redbot.core import commands
