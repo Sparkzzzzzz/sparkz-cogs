@@ -19,7 +19,7 @@ class SccEval(commands.Cog):
     @commands.is_owner()
     async def verifyme(self, ctx):
       """verifies that the user running the command is the bot owner"""
-      await ctx.channel.send("<@777788426714873877> you are Sparkz sir, my dear bot owner.")
+      await ctx.channel.send("You are <@777788426714873877> sir, my dear bot owner.")
 
 
    
