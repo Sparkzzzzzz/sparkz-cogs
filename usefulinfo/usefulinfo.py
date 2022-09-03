@@ -10,9 +10,9 @@ class UsefulInfo(commands.Cog):
         self.bot = bot
 
     @commands.command()
-    async def creator(ctx):
+    async def creator(self, ctx):
      await ctx.channel.send("I was made by my bot owner **Sparkz#2645**!")
     
     @commands.command()
-    async def version(ctx):
+    async def version(self, ctx):
      await ctx.channel.send("version: `0.0.1`")   
