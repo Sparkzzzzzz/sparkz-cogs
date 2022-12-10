@@ -10,7 +10,7 @@ bot = interactions.Client
     scope=916294593228714014,
 )
 
-async def vote(ctx: interactions.CommandContext, ephemeral=True):
+async def vote(self, ctx: interactions.CommandContext, ephemeral=True):
     embed = discord.Embed(title="Vote for CeneVspeed Clan!", description="https://top.gg/servers/916294593228714014") #,color=Hex code
     embed.add_field(name="Perks:", value="")
     embed.add_field(name="", value="`>` Access to <#979594849273643048>")
