@@ -13,40 +13,7 @@ class FunMsg(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-    
-    def ready_to_send(msg_count: int):
-      """get the active count and check if message counter has exceeded"""
-      _min, _max = Config.active_msg_count
-      active_msg_count = randint(_min, _max)
-
-      return msg_count >= active_msg_count
-      # return True
-
-
-def color_options(colors):
-    """
-    generate a random color as correct, then 3 wrong colors, shuffle, and return
-    correct answer and all possible answers
-    """
-    color = choice(colors)
-    wrong = sample([c for c in colors if c != color], 3)
-    answers = shuffle_answers(color, wrong)
-
-    return color, answers
-
-
-def shuffle_answers(color, wrong):
-    '''create an list of all answers, shuffle, then return shuffled list'''
-    answers = [c for c in wrong]
-    answers.append(color)
-    shuffle(answers)
-
-    return answers
-
-
-class FunMsg(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+        
         self.colors = [
             ("⚫","Black"),
             ("🔵","Blue"),
@@ -62,6 +29,38 @@ class FunMsg(commands.Cog):
         self.active_msg_count = 0
         self.fun_msg = None
         self.correct = None
+    
+    def ready_to_send(msg_count: int):
+      """get the active count and check if message counter has exceeded"""
+      _min, _max = Config.active_msg_count
+      active_msg_count = randint(_min, _max)
+
+      return msg_count >= active_msg_count
+      # return True
+
+
+    def color_options(colors):
+        """
+        generate a random color as correct, then 3 wrong colors, shuffle, and return
+        correct answer and all possible answers
+        """
+        color = choice(colors)
+        wrong = sample([c for c in colors if c != color], 3)
+        answers = shuffle_answers(color, wrong)
+
+        return color, answers
+
+
+    def shuffle_answers(color, wrong):
+        '''create an list of all answers, shuffle, then return shuffled list'''
+        answers = [c for c in wrong]
+        answers.append(color)
+        shuffle(answers)
+
+        return answers
+
+
+    
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -156,9 +155,5 @@ class FunMsg(commands.Cog):
             if expiry < now:
                 expiry = 0
                 self.active_msg_count = 0
-
-
-def setup(bot):
-    bot.add_cog(FunMsg(bot))
         
     
