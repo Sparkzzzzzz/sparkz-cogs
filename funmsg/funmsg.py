@@ -5,7 +5,7 @@ from disnake import Embed
 from datetime import datetime, timedelta
 from random import choice, sample, randint, shuffle
 from config import Config
-from utils.buttons import Answers
+from funmsg.utils.buttons import Answers
 from redbot.core import commands
 
 class FunMsg(commands.Cog):
