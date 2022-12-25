@@ -1,18 +1,26 @@
 {
+    "author": ["Sparkz#2645"],
+    "install_msg": "Thanks for installing FunMsg Sparkz!",
     "name": "FunMsg",
-    "short": "Sends a random conversation initiating message when invoked!",
-    "description": "Self explainatory!",
-    "end_user_data_statement": "This cog does not persistently store any data or metadata about users.",
-    "install_msg": "Thanks for installing! Have fun Sparkz!",
-    "author": [
-        "Sparkz"  
-    ],
-    "required_cogs": {},
-    "tags": [
-        "Topic"
-    ],
-    "min_bot_version": "1.0.0",
-    "hidden": false,
-    "disabled": false,
-    "type": "COG"
+    "disabled": "False",
+    "short": "Fun shit!",
+    "description": "Revive da chat!",
+    "tags": ["chatrevive", "buttons"],
+    "requirements": [
+        "aiohttp==3.8.3",
+        "aiosignal==1.3.1",
+        "async-timeout==4.0.2",
+        "attrs==22.1.0",
+        "charset-normalizer==2.1.1",
+        "config==0.5.1",
+        "discord==2.1.0",
+        "discord-py-interactions==4.3.4",
+        "discord.py==2.1.0",
+        "disnake==2.7.0",
+        "frozenlist==1.3.3",
+        "idna==3.4",
+        "multidict==6.0.3",
+        "utils==1.0.1",
+        "yarl==1.8.2"
+    ]
 }
