@@ -3,7 +3,7 @@ class Config:
 
     # provie a min and max number of messages before the
     # bot submits the "fun" message
-    active_msg_count = (5,10) # (min #, max #)
+    active_msg_count = (5, 10) # (min #, max #)
 
     # id of the channel to monitor
     monitor_channel_id = 916943158699491378
