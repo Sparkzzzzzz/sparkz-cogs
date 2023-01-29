@@ -2,7 +2,7 @@
     "author": ["Sparkz#2645"],
     "install_msg": "Thanks for installing FunMsg Sparkz!",
     "name": "FunMsg",
-    "disabled": "false",
+    "disabled": false,
     "short": "Fun shit!",
     "description": "Revive da chat!",
     "tags": ["chatrevive", "buttons"],
