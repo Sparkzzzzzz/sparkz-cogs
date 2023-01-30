@@ -13,7 +13,8 @@
        "fun",
        "message",
        "FunMsg",
-       "Fun Message"
+       "Fun Message",
+       "Fun-Message"
     ],
     "min_bot_version": "1.0.0",
     "hidden": false,
