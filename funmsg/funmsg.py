@@ -8,13 +8,13 @@ import math
 import requests
 import time
 import pytz
-from redbot.core import commands
+from redclient.core import commands
 
 class FunMsg(commands.Cog):
     """Sends a random conversation initiating topic when invoked!"""
 
-    def __init__(self, bot):
-        self.bot = bot
+    def __init__(self, client):
+        self.client = client
 
     DefaultClearAmmount = 5
     cooldown = 5
@@ -35,7 +35,7 @@ class FunMsg(commands.Cog):
             i = 0
 
 
-    @bot.event
+    @client.event
     async def on_ready():
         await mainloop()
 
@@ -58,7 +58,7 @@ class FunMsg(commands.Cog):
         embed = discord.Embed(title="Here's a topic!",
                             color=discord.Color.orange(),
                             description=firstItems[selectedItem])
-        await bot.get_channel(channel).send(embed=embed)
+        await client.get_channel(channel).send(embed=embed)
 
         # Shuffle the list
         random.shuffle(options)
@@ -83,7 +83,7 @@ class FunMsg(commands.Cog):
         disabled = "False"
 
 
-    @bot.event
+    @client.event
     async def on_message(message):
 
         global disabled
