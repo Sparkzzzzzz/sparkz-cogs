@@ -13,8 +13,8 @@ from redbot.core import commands
 class FunMsg(commands.Cog):
     """Sends a random conversation initiating topic when invoked!"""
 
-    def __init__(self, client):
-        self.client = client
+    def __init__(self, bot):
+        self.bot = bot
 
     DefaultClearAmmount = 5
     cooldown = 5
