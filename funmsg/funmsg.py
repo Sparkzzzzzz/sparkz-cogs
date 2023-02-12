@@ -35,11 +35,9 @@ class FunMsg(commands.Cog):
             i = 0
 
 
-    @client.event
+    @bot.event
     async def on_ready():
-        print('Hello! I am online!')
         await mainloop()
-        await client.change_presence(activity=discord.Game("With Ronav's Mom"))
 
 
     def move_to_end(list, elem):
@@ -60,7 +58,7 @@ class FunMsg(commands.Cog):
         embed = discord.Embed(title="Here's a topic!",
                             color=discord.Color.orange(),
                             description=firstItems[selectedItem])
-        await client.get_channel(channel).send(embed=embed)
+        await bot.get_channel(channel).send(embed=embed)
 
         # Shuffle the list
         random.shuffle(options)
@@ -85,7 +83,7 @@ class FunMsg(commands.Cog):
         disabled = "False"
 
 
-    @client.event
+    @bot.event
     async def on_message(message):
 
         global disabled
