@@ -20,7 +20,7 @@ class FunMsg(commands.Cog):
     intents.members = True
     intents.reactions = True
 
-    client = commands.Bot(command_prefix='.', intents=intents)
+    client = commands.Bot(intents=intents)
 
 
     DefaultClearAmmount = 5
