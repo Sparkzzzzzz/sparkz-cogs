@@ -8,7 +8,7 @@ import math
 import requests
 import time
 import pytz
-from redclient.core import commands
+from redbot.core import commands
 
 class FunMsg(commands.Cog):
     """Sends a random conversation initiating topic when invoked!"""
