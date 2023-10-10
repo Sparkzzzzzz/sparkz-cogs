@@ -3,7 +3,7 @@ from discord import client
 from redbot.core import commands
 import random
 
-class _8ball(commands.Cog):
+class eball(commands.Cog):
     """Owner only custom commands!"""
 
     def __init__(self, bot):
@@ -32,6 +32,3 @@ class _8ball(commands.Cog):
         embed.add_field(name='Question: ', value=f'{question}', inline=True)
         embed.add_field(name='Answer: ', value=f'{response}', inline=False)
         await ctx.send(embed=embed)
-    
-        
-    
