@@ -1,0 +1,19 @@
+{
+    "name": "Neil Shit",
+    "short": "A cog to show the kid his rightful place.",
+    "description": "Self explainatory!",
+    "end_user_data_statement": "This cog does not persistently store any data or metadata about users.",
+    "install_msg": "Thanks for installing! Crush his ass!",
+    "author": [
+        "Sparkz"  
+    ],
+    "required_cogs": {},
+    "tags": [
+        "Useful",
+        "Useful"
+    ],
+    "min_bot_version": "0.0.1",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG"
+}
