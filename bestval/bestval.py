@@ -41,6 +41,10 @@ class BestVal(commands.Cog):
             a = "Cyrus is the best Valletta in existence."
             await ctx.channel.send(a)
 
+        if "Who's the best Valletta?" in sentence:
+            d = "Cyrus is the best Valletta in existence."
+            await ctx.channel.send(d)
+
         elif "Cyrus" in sentence:
             b = "Lord Cyrus is the best."
             await ctx.channel.send(b)
