@@ -10,7 +10,7 @@ class Lyrics(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.api_token = "K5BsSazUWSUteWTFI7_Fsyd2RE7KF2RypVrKhstRdFOVfUOMdLXYFaSEotvhL2tg"  # Replace this with your Genius token
+        self.api_token = "K5BsSazUWSUteWTFI7_Fsyd2RE7KF2RypVrKhstRdFOVfUOMdLXYFaSEotvhL2tg"  # Replace this with your Genius access token
 
     async def search_genius(self, query):
         headers = {"Authorization": f"Bearer {self.api_token}"}
@@ -33,21 +33,29 @@ class Lyrics(commands.Cog):
                 text = re.sub(r"<.*?>", "", "\n".join(lyrics_match))
                 return text.strip()
 
+    def get_current_song(self, guild):
+        audio = self.bot.get_cog("Audio")
+        if not audio:
+            return None
+
+        states = getattr(audio, "_guild_states", {})
+        if guild.id not in states:
+            return None
+
+        state = states[guild.id]
+        current = getattr(state, "current", None)
+        if not current or not hasattr(current, "title"):
+            return None
+
+        return current.title
+
     @commands.command()
     async def lyrics(self, ctx, *, song: str = None):
         """Shows the lyrics for a song (uses Genius API)."""
         if song is None:
-            audio = self.bot.get_cog("Audio")
-            if not audio:
-                return await ctx.send("❌ Audio cog not found.")
-
-            # Get currently playing track
-            player = await audio.get_player(ctx.guild)
-            track = player.get_playing_track()
-
-            if not track:
-                return await ctx.send("❌ Nothing is currently playing.")
-            song = track["title"]
+            song = self.get_current_song(ctx.guild)
+            if not song:
+                return await ctx.send("❌ Could not get the current song from Audio cog.")
 
         await ctx.typing()
         results = await self.search_genius(song)
@@ -68,7 +76,7 @@ class Lyrics(commands.Cog):
                 title=title,
                 url=url,
                 description=page,
-                color=discord.Color.purple()
+                color=discord.Color.green()
             )
             embed.set_footer(text=f"Page {index+1}/{len(pages)}")
             await ctx.send(embed=embed)
