@@ -1,101 +1,79 @@
 import discord
-from redbot.core import commands
+from redbot.core import commands, Config
 import aiohttp
-from redbot.core.utils.chat_formatting import pagify
+from typing import Optional
+from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 
-GENIUS_API_URL = "https://api.genius.com"
+GENIUS_API_BASE = "https://api.genius.com"
 
 class Lyrics(commands.Cog):
+    """Get song lyrics using Genius"""
+
     def __init__(self, bot):
         self.bot = bot
-        self.token = None
+        self.config = Config.get_conf(self, identifier=1234567890)
+        self.config.register_global(token=None)
 
-    @commands.command()
     @commands.is_owner()
+    @commands.command()
     async def setgeniustoken(self, ctx, token: str):
-        """Set Genius API token. (Hidden, secure)"""
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass  # Message might already be gone or missing permissions
-
-        self.token = token
+        """Set Genius API token. (Hidden from logs)"""
+        await ctx.message.delete()
+        await self.config.token.set(token)
         try:
             await ctx.message.add_reaction("✅")
         except discord.HTTPException:
-            await ctx.send("✅ Token set securely.", delete_after=5)
+            await ctx.send("✅ Token set.", delete_after=5)
 
+    @commands.command()
+    async def lyrics(self, ctx, *, song: Optional[str] = None):
+        """Get lyrics for the currently playing song or a given name."""
+        token = await self.config.token()
+        if not token:
+            return await ctx.send("❌ Genius token not set. Use `[p]setgeniustoken`.")
 
-    async def get_current_song_title(self, ctx):
-        audio = self.bot.get_cog("Audio")
-        if not audio:
-            return None
+        if not song:
+            # Get currently playing song using Audio API
+            audio = self.bot.get_cog("Audio")
+            if not audio:
+                return await ctx.send("❌ Audio cog not loaded.")
+            try:
+                info = await audio.get_playing_track_info(ctx.guild)
+                if not info or "title" not in info or "author" not in info:
+                    raise ValueError
+                song = f"{info['author']} {info['title']}"
+            except Exception:
+                return await ctx.send("❌ Could not get the current song from Audio cog.")
 
-        # Accessing internal Audio state (works for Red 3.5.20, Audio 2.5.0)
-        states = getattr(audio, "_guild_states", {})
-        state = states.get(ctx.guild.id)
-        if not state:
-            return None
+        await ctx.trigger_typing()
+        try:
+            lyrics_text = await self.get_lyrics(song, token)
+        except Exception as e:
+            return await ctx.send(f"❌ Error retrieving lyrics: {e}")
 
-        current = getattr(state, "current", None)
-        if not current:
-            return None
+        if not lyrics_text:
+            return await ctx.send("❌ No lyrics found.")
 
-        return getattr(current, "title", None)
+        pages = [lyrics_text[i:i+2000] for i in range(0, len(lyrics_text), 2000)]
+        embeds = [discord.Embed(description=page, color=discord.Color.blurple()).set_footer(text=f"Page {i+1}/{len(pages)}") for i, page in enumerate(pages)]
+        await menu(ctx, embeds, DEFAULT_CONTROLS)
 
-    async def get_lyrics(self, title):
-        if not self.token:
-            return None, "❌ Genius token not set. Use `.setgeniustoken <token>`"
-        headers = {"Authorization": f"Bearer {self.token}"}
+    async def get_lyrics(self, query, token):
+        headers = {"Authorization": f"Bearer {token}"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{GENIUS_API_URL}/search?q={title}", headers=headers) as resp:
+            async with session.get(f"{GENIUS_API_BASE}/search", params={"q": query}, headers=headers) as resp:
                 data = await resp.json()
-                if not data["response"]["hits"]:
-                    return None, "❌ No results found."
+                hits = data["response"]["hits"]
+                if not hits:
+                    return None
+                song_path = hits[0]["result"]["path"]
 
-                song_path = data["response"]["hits"][0]["result"]["path"]
-                song_url = f"https://genius.com{song_path}"
-                async with session.get(song_url) as page:
-                    html = await page.text()
+            # Now fetch lyrics page from Genius (HTML scrape)
+            async with session.get(f"https://genius.com{song_path}") as response:
+                html = await response.text()
 
+        # Strip lyrics using crude parsing
         import re
-        match = re.findall(r'<div data-lyrics-container="true">(.*?)</div>', html, re.DOTALL)
-        if not match:
-            return None, "❌ Could not extract lyrics."
-
-        clean = re.sub(r"<.*?>", "", "".join(match)).strip()
-        return clean, None
-
-    @commands.command()
-    async def lyrics(self, ctx):
-        """Get lyrics for the current song."""
-        title = await self.get_current_song_title(ctx)
-        if not title:
-            return await ctx.send("❌ Could not get the current song from Audio cog.")
-
-        await ctx.send(f"🔎 Searching Genius for `{title}`...")
-        lyrics, error = await self.get_lyrics(title)
-
-        if error:
-            return await ctx.send(error)
-
-        for page in pagify(lyrics, page_length=2000):
-            await ctx.send(page)
-
-    @commands.command()
-    async def debugaudio(self, ctx):
-        """Debug Audio state."""
-        audio = self.bot.get_cog("Audio")
-        if not audio:
-            return await ctx.send("❌ Audio cog not found.")
-
-        states = getattr(audio, "_guild_states", {})
-        state = states.get(ctx.guild.id)
-        if not state:
-            return await ctx.send("❌ No state found for this guild.")
-
-        current = getattr(state, "current", None)
-        if not current:
-            return await ctx.send("❌ No track currently playing.")
-
-        return await ctx.send(f"🎵 Currently playing: `{getattr(current, 'title', 'Unknown')}`")
+        lyrics = re.findall(r'<div[^>]+data-lyrics-container="true"[^>]*>(.*?)</div>', html, re.DOTALL)
+        lyrics_text = "\n".join([re.sub(r'<[^>]+>', '', block).strip() for block in lyrics])
+        return lyrics_text.strip() if lyrics_text else None
