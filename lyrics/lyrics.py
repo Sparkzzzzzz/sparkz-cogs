@@ -1,52 +1,55 @@
 import discord
-from redbot.core import commands, app_commands
+from redbot.core import commands
 from redbot.core.utils.chat_formatting import pagify
 import aiohttp
 import urllib.parse
-
-GENIUS_API_BASE = "https://api.genius.com"
+import re
 
 class Lyrics(commands.Cog):
-    """Get song lyrics using the Genius API."""
+    """Get song lyrics using Genius."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.api_token = "YOUR_GENIUS_API_TOKEN"  # Replace with your token or set via config later
+        self.api_token = "K5BsSazUWSUteWTFI7_Fsyd2RE7KF2RypVrKhstRdFOVfUOMdLXYFaSEotvhL2tg"  # Replace this with your Genius token
 
     async def search_genius(self, query):
         headers = {"Authorization": f"Bearer {self.api_token}"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{GENIUS_API_BASE}/search?q={urllib.parse.quote(query)}", headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data["response"]["hits"]
-        return None
+            async with session.get(f"https://api.genius.com/search?q={urllib.parse.quote(query)}", headers=headers) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data["response"]["hits"]
 
     async def get_lyrics_from_url(self, url):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                if resp.status == 200:
-                    html = await resp.text()
-                    # Naive scrape — this is prone to break if Genius changes layout
-                    import re
-                    match = re.search(r'<div class="lyrics">.*?<p>(.*?)</p>', html, re.DOTALL)
-                    if match:
-                        return re.sub(r'<.*?>', '', match.group(1)).strip()
-        return None
+                if resp.status != 200:
+                    return None
+                html = await resp.text()
+                lyrics_match = re.findall(r'<div[^>]+data-lyrics-container[^>]*>(.*?)</div>', html, re.DOTALL)
+                if not lyrics_match:
+                    return None
+                text = re.sub(r"<.*?>", "", "\n".join(lyrics_match))
+                return text.strip()
 
     @commands.command()
-    async def lyrics(self, ctx: commands.Context, *, song: str = None):
-        """Fetch song lyrics from Genius. If no song is provided, it tries the currently playing one."""
+    async def lyrics(self, ctx, *, song: str = None):
+        """Shows the lyrics for a song (uses Genius API)."""
         if song is None:
-            audio_cog = self.bot.get_cog("Audio")
-            if audio_cog is None:
-                return await ctx.send("❌ Audio cog not loaded.")
+            audio = self.bot.get_cog("Audio")
+            if not audio:
+                return await ctx.send("❌ Audio cog not found.")
 
-            try:
-                song = await audio_cog.get_api_info(ctx.guild.id, "title")
-            except Exception:
-                return await ctx.send("❌ Could not get the current song from Audio cog.")
+            # Get currently playing track
+            player = await audio.get_player(ctx.guild)
+            track = player.get_playing_track()
 
+            if not track:
+                return await ctx.send("❌ Nothing is currently playing.")
+            song = track["title"]
+
+        await ctx.typing()
         results = await self.search_genius(song)
         if not results:
             return await ctx.send("❌ No lyrics found.")
@@ -57,11 +60,15 @@ class Lyrics(commands.Cog):
 
         lyrics = await self.get_lyrics_from_url(url)
         if not lyrics:
-            return await ctx.send(f"Lyrics page: <{url}>\n❌ Couldn't extract lyrics, check the site manually.")
+            return await ctx.send(f"Lyrics page: <{url}>\n❌ Couldn't extract lyrics, please check manually.")
 
         pages = list(pagify(lyrics, page_length=1900))
-
-        for i, page in enumerate(pages):
-            embed = discord.Embed(title=title, description=page, url=url, color=discord.Color.green())
-            embed.set_footer(text=f"Page {i+1}/{len(pages)}")
+        for index, page in enumerate(pages):
+            embed = discord.Embed(
+                title=title,
+                url=url,
+                description=page,
+                color=discord.Color.purple()
+            )
+            embed.set_footer(text=f"Page {index+1}/{len(pages)}")
             await ctx.send(embed=embed)
