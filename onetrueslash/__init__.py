@@ -8,11 +8,11 @@ from redbot.core.utils import get_end_user_data_statement_or_raise
 
 __red_end_user_data_statement__ = get_end_user_data_statement_or_raise(__file__)
 
-from .commands import onetrueslash
+from .commands import command
 from .events import before_hook, on_user_update
 from .utils import valid_app_name
 
-LOG = logging.getLogger("red.fluffy.onetrueslash")
+LOG = logging.getLogger("red.fluffy.command")
 
 
 async def setup(bot: Red) -> None:
@@ -26,16 +26,16 @@ async def _setup(bot: Red):
     await bot.wait_until_red_ready()
     assert bot.user
     try:
-        onetrueslash.name = valid_app_name(bot.user.name)
-        bot.tree.add_command(onetrueslash, guild=None)
+        command.name = valid_app_name(bot.user.name)
+        bot.tree.add_command(command, guild=None)
     except ValueError:
         await bot.send_to_owners(
-            f"`onetrueslash` was unable to make the name {bot.user.name!r} "
+            f"`command` was unable to make the name {bot.user.name!r} "
             "into a valid slash command name. The command name was left unchanged."
         )
     except app_commands.CommandAlreadyRegistered:
         raise CogLoadError(
-            f"A slash command named {onetrueslash.name} is already registered."
+            f"A slash command named {command.name} is already registered."
         ) from None
     except app_commands.CommandLimitReached:
         raise CogLoadError(
