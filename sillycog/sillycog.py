@@ -1,45 +1,63 @@
-from redbot.core import commands, Config
 import aiohttp
+import discord
+from redbot.core import commands, Config
+from redbot.core.bot import Red
+from redbot.core.commands import Context
+from typing import Optional
 
 
 class SillyCog(commands.Cog):
-    """Check SillyDev panel for server status like days until downtime."""
+    """Get your SillyDev credit info."""
 
-    def __init__(self, bot):
+    def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890)
         self.config.register_global(api_key=None)
 
-    @commands.command(name="setapi")
     @commands.is_owner()
-    async def set_api_key(self, ctx, key: str):
-        """Set your SillyDev panel API key."""
+    @commands.command(name="setsillyapi")
+    async def set_api_key(self, ctx: Context, key: str):
+        """Set your SillyDev API key."""
         await self.config.api_key.set(key)
-        await ctx.send("✅ API key has been set successfully.")
+        await ctx.send("✅ SillyDev API key saved!")
 
-    @commands.command(name="serverstatus")
-    async def check_server_status(self, ctx):
-        """Check days until server downtime from SillyDev panel."""
-        api_key = await self.config.api_key()
+    @commands.is_owner()
+    @commands.command(name="sillystats")
+    async def silly_stats(self, ctx: Context):
+        """Show your SillyDev credit balance."""
+        api_key: Optional[str] = await self.config.api_key()
+
         if not api_key:
-            return await ctx.send("❌ API key not set. Use `.setapi <key>` first.")
+            await ctx.send("❌ No API key found. Use `[p]setsillyapi <key>` first.")
+            return
 
-        url = "https://panel.sillydev.co.uk/api/client"
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status != 200:
-                    return await ctx.send(f"❌ API Error: {resp.status}")
-                data = await resp.json()
+        url = "https://panel.sillydev.co.uk/api/client/store"
 
         try:
-            first_server = data["data"][0]["attributes"]
-            server_name = first_server["name"]
-            renewal_days = first_server["renewal"]
-            await ctx.send(
-                f"🖥️ **{server_name}**\n"
-                f"⏳ Days left until downtime: **{renewal_days}**"
-            )
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        return await ctx.send(
+                            f"❌ API request failed with status {resp.status}."
+                        )
+
+                    data = await resp.json()
+
+                    credits = data.get("attributes", {}).get("credits", None)
+
+                    if credits is None:
+                        return await ctx.send(
+                            "❌ Could not find `credits` in API response."
+                        )
+
+                    embed = discord.Embed(
+                        title="💳 SillyDev Stats",
+                        description=f"**Credits Remaining:** `{credits}`",
+                        color=discord.Color.gold(),
+                    )
+                    await ctx.send(embed=embed)
+
         except Exception as e:
-            await ctx.send(f"⚠️ Failed to parse response: `{e}`")
+            await ctx.send(f"❌ An error occurred:\n```{str(e)}```")
