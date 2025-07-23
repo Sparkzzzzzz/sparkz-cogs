@@ -1,54 +1,45 @@
+from redbot.core import commands, Config
 import aiohttp
-from datetime import datetime
-from redbot.core import commands
-from redbot.core.bot import Red
-from redbot.core.utils.chat_formatting import warning
-import discord
 
 
 class SillyCog(commands.Cog):
-    """Check server downtime and credits from SillyDev."""
+    """Check SillyDev panel for server status like days until downtime."""
 
-    def __init__(self, bot: Red):
+    def __init__(self, bot):
         self.bot = bot
+        self.config = Config.get_conf(self, identifier=1234567890)
+        self.config.register_global(api_key=None)
+
+    @commands.command(name="setapi")
+    @commands.is_owner()
+    async def set_api_key(self, ctx, key: str):
+        """Set your SillyDev panel API key."""
+        await self.config.api_key.set(key)
+        await ctx.send("✅ API key has been set successfully.")
 
     @commands.command(name="serverstatus")
-    async def server_status(self, ctx):
-        """Check how many days till downtime and your credits from SillyDev."""
-        # Get API key from Red's api_tokens system
-        api_key = await self.bot.get_shared_api_tokens("sillydev")
-        token = api_key.get("key")
+    async def check_server_status(self, ctx):
+        """Check days until server downtime from SillyDev panel."""
+        api_key = await self.config.api_key()
+        if not api_key:
+            return await ctx.send("❌ API key not set. Use `.setapi <key>` first.")
 
-        if not token:
-            return await ctx.send(
-                warning("❌ API key not set. Use `.set api sillydev key <your_key>`")
-            )
-
-        url = "https://api.sillydev.xyz/server/status"
-        headers = {"Authorization": f"Bearer {token}"}
+        url = "https://panel.sillydev.co.uk/api/client"
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    return await ctx.send("⚠️ Failed to fetch data from SillyDev API.")
+                    return await ctx.send(f"❌ API Error: {resp.status}")
                 data = await resp.json()
 
-        expiry_str = data.get("expiry")
-        credits = data.get("credits")
-
         try:
-            expiry_date = datetime.strptime(expiry_str, "%Y-%m-%dT%H:%M:%SZ")
-            days_left = (expiry_date.date() - datetime.utcnow().date()).days
-        except Exception:
-            return await ctx.send("❌ Invalid expiry date format returned from API.")
-
-        embed = discord.Embed(
-            title="📊 SillyDev Server Status", color=discord.Color.orange()
-        )
-        embed.add_field(
-            name="🕒 Days Left", value=f"**{days_left}** days", inline=False
-        )
-        embed.add_field(name="💰 Credits", value=f"**{credits}** credits", inline=False)
-        embed.set_footer(text="Fetched from SillyDev")
-
-        await ctx.send(embed=embed)
+            first_server = data["data"][0]["attributes"]
+            server_name = first_server["name"]
+            renewal_days = first_server["renewal"]
+            await ctx.send(
+                f"🖥️ **{server_name}**\n"
+                f"⏳ Days left until downtime: **{renewal_days}**"
+            )
+        except Exception as e:
+            await ctx.send(f"⚠️ Failed to parse response: `{e}`")
