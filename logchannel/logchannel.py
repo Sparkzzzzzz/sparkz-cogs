@@ -5,7 +5,7 @@ import datetime
 
 
 class LogChannel(commands.Cog):
-    """Log edits and deletes from a specific channel to another."""
+    """Log message edits and deletes from one channel to another."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -19,20 +19,20 @@ class LogChannel(commands.Cog):
     @commands.group()
     @commands.guild_only()
     async def logchannel(self, ctx):
-        """Configure log channels."""
+        """Configure source and log channels."""
         pass
 
     @logchannel.command(name="setsource")
     async def set_source(self, ctx, channel: discord.TextChannel):
-        """Set the channel to monitor."""
+        """Set the source channel to monitor for edits/deletes."""
         await self.config.guild(ctx.guild).source_channel.set(channel.id)
-        await ctx.send(f"Source channel set to {channel.mention}")
+        await ctx.send(f"✅ Source channel set to {channel.mention}")
 
     @logchannel.command(name="settarget")
     async def set_target(self, ctx, channel: discord.TextChannel):
-        """Set the channel where logs will be sent."""
+        """Set the target log channel."""
         await self.config.guild(ctx.guild).log_channel.set(channel.id)
-        await ctx.send(f"Log channel set to {channel.mention}")
+        await ctx.send(f"✅ Log channel set to {channel.mention}")
 
     async def send_log(self, guild: discord.Guild, embed: discord.Embed):
         log_id = await self.config.guild(guild).log_channel()
@@ -46,18 +46,23 @@ class LogChannel(commands.Cog):
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if before.author.bot or not before.guild:
             return
+
         source_id = await self.config.guild(before.guild).source_channel()
         if before.channel.id != source_id:
             return
         if before.content == after.content:
-            return  # Skip embeds and invisible changes
+            return  # Ignore embed updates or invisible changes
 
         embed = discord.Embed(
             title="✏️ Message Edited",
             color=discord.Color.orange(),
             timestamp=datetime.datetime.utcnow(),
         )
-        embed.add_field(name="Author", value=before.author.mention, inline=True)
+        embed.add_field(
+            name="Author",
+            value=f"{before.author.mention} (`{before.author.id}`)",
+            inline=True,
+        )
         embed.add_field(name="Channel", value=before.channel.mention, inline=True)
         embed.add_field(
             name="Before", value=before.content[:1024] or "*empty*", inline=False
@@ -73,6 +78,7 @@ class LogChannel(commands.Cog):
     async def on_message_delete(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+
         source_id = await self.config.guild(message.guild).source_channel()
         if message.channel.id != source_id:
             return
@@ -82,7 +88,11 @@ class LogChannel(commands.Cog):
             color=discord.Color.red(),
             timestamp=datetime.datetime.utcnow(),
         )
-        embed.add_field(name="Author", value=message.author.mention, inline=True)
+        embed.add_field(
+            name="Author",
+            value=f"{message.author.mention} (`{message.author.id}`)",
+            inline=True,
+        )
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
         embed.add_field(
             name="Content", value=message.content[:1024] or "*empty*", inline=False
