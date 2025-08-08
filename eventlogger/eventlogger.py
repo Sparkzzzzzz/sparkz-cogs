@@ -1,221 +1,201 @@
-import discord
-from redbot.core import commands, Config
+from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
-from typing import Optional
+from discord.ext.commands import Context
+from discord import Embed, Message, Guild, TextChannel, Member
+import discord
+import datetime
 
 
 class EventLogger(commands.Cog):
-    """Logs server events except message edits/deletes in the log channel."""
+    """Log server events excluding message edits/deletes in the log channel"""
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=132456)
-        self.config.register_guild(
-            log_channel=None,
-            toggled_events={event: True for event in self.all_events()},
-        )
+        self.config = Config.get_conf(self, identifier=9384729384)
+        default_guild = {
+            "log_channel": None,
+            "enabled": {
+                "member_join": True,
+                "member_remove": True,
+                "ban": True,
+                "unban": True,
+                "channel_create": True,
+                "channel_delete": True,
+                "channel_update": True,
+                "role_create": True,
+                "role_delete": True,
+                "role_update": True,
+                "guild_update": True,
+                "emoji_update": True,
+                "message_edit": True,
+                "message_delete": True,
+            },
+        }
+        self.config.register_guild(**default_guild)
 
-    @staticmethod
-    def all_events():
-        return [
-            "guild_join",
-            "guild_remove",
-            "member_join",
-            "member_remove",
-            "member_ban",
-            "member_unban",
-            "role_create",
-            "role_delete",
-            "role_update",
-            "channel_create",
-            "channel_delete",
-            "channel_update",
-            "emoji_create",
-            "emoji_delete",
-            "emoji_update",
-            "guild_update",
-            "message_edit",
-            "message_delete",
-        ]
+    def _should_log(self, guild: Guild, event: str) -> bool:
+        return self.config.guild(guild).enabled.get_attr(event)()
 
-    async def get_log_channel(
-        self, guild: discord.Guild
-    ) -> Optional[discord.TextChannel]:
-        channel_id = await self.config.guild(guild).log_channel()
-        return guild.get_channel(channel_id)
+    async def _log(self, guild: Guild, embed: Embed):
+        log_channel_id = await self.config.guild(guild).log_channel()
+        if log_channel_id:
+            channel = guild.get_channel(log_channel_id)
+            if channel and isinstance(channel, TextChannel):
+                await channel.send(embed=embed)
 
-    async def should_log(
-        self,
-        guild: discord.Guild,
-        event: str,
-        channel: Optional[discord.TextChannel] = None,
-    ) -> bool:
-        toggled = await self.config.guild(guild).toggled_events()
-        log_channel = await self.get_log_channel(guild)
-        if not toggled.get(event, False):
-            return False
-        if channel and log_channel and channel.id == log_channel.id:
-            if event in ["message_edit", "message_delete"]:
-                return False
-        return True
+    def _format_embed(self, title: str, description: str) -> Embed:
+        embed = Embed(title=title, description=description, color=discord.Color.blue())
+        embed.timestamp = datetime.datetime.utcnow()
+        return embed
 
-    # ======== Commands ========
-    @commands.group()
+    # === LOGGING COMMANDS ===
+
+    @commands.group(name="eventlogger", aliases=["elog"])
     @commands.guild_only()
-    async def eventlog(self, ctx):
-        """Base command for EventLogger."""
-        pass
+    @checks.admin_or_permissions(manage_guild=True)
+    async def eventlogger(self, ctx: Context):
+        """EventLogger settings"""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help()
 
-    @eventlog.command()
-    async def setchannel(self, ctx, channel: discord.TextChannel):
-        """Set the log channel."""
+    @eventlogger.command(name="setchannel")
+    async def _set_channel(self, ctx: Context, channel: TextChannel):
+        """Set the event log channel"""
         await self.config.guild(ctx.guild).log_channel.set(channel.id)
-        await ctx.send(f"✅ Event log channel set to {channel.mention}.")
+        await ctx.send(f"Event log channel set to {channel.mention}")
 
-    @eventlog.command()
-    async def toggle(self, ctx, event: str):
-        """Toggle a specific event on/off."""
-        event = event.lower()
-        if event not in self.all_events():
-            await ctx.send(
-                f"❌ Unknown event. Choose from: `{', '.join(self.all_events())}`"
+    @eventlogger.command(name="toggle")
+    async def _toggle_event(self, ctx: Context, event: str.lower):
+        """Toggle a specific event"""
+        current = await self.config.guild(ctx.guild).enabled.get_attr(event)()
+        await self.config.guild(ctx.guild).enabled.get_attr(event).set(not current)
+        await ctx.send(f"Logging for `{event}` is now set to `{not current}`")
+
+    @eventlogger.command(name="toggleall")
+    async def _toggle_all(self, ctx: Context, value: bool):
+        """Enable/Disable all event logging"""
+        await self.config.guild(ctx.guild).enabled.set(
+            {k: value for k in await self.config.guild(ctx.guild).enabled()}
+        )
+        await ctx.send(f"Logging for all events is now set to `{value}`")
+
+    @eventlogger.command(name="status")
+    async def _status(self, ctx: Context):
+        """Show enabled/disabled status of events"""
+        settings = await self.config.guild(ctx.guild).enabled()
+        status_lines = [f"`{k}`: {'✅' if v else '❌'}" for k, v in settings.items()]
+        await ctx.send("**Current Event Logging Status:**\n" + "\n".join(status_lines))
+
+    # === EVENT HANDLERS ===
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: Member):
+        if await self._should_log(member.guild, "member_join"):
+            embed = self._format_embed(
+                "Member Joined", f"{member.mention} joined the server."
             )
-            return
-        current = await self.config.guild(ctx.guild).toggled_events()
-        current[event] = not current.get(event, True)
-        await self.config.guild(ctx.guild).toggled_events.set(current)
-        status = "enabled" if current[event] else "disabled"
-        await ctx.send(f"✅ `{event}` logging is now {status}.")
+            await self._log(member.guild, embed)
 
-    @eventlog.command()
-    async def toggleall(self, ctx):
-        """Toggle all events at once."""
-        current = await self.config.guild(ctx.guild).toggled_events()
-        all_on = all(current.values())
-        new_state = not all_on
-        updated = {e: new_state for e in self.all_events()}
-        await self.config.guild(ctx.guild).toggled_events.set(updated)
-        status = "enabled" if new_state else "disabled"
-        await ctx.send(f"✅ All event logging is now {status}.")
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: Member):
+        if await self._should_log(member.guild, "member_remove"):
+            embed = self._format_embed(
+                "Member Left", f"{member.mention} left the server."
+            )
+            await self._log(member.guild, embed)
 
-    @eventlog.command(name="settings")
-    async def _settings(self, ctx):
-        """Show current log settings."""
-        log_channel = await self.get_log_channel(ctx.guild)
-        toggled = await self.config.guild(ctx.guild).toggled_events()
-        enabled = [e for e, v in toggled.items() if v]
-        disabled = [e for e, v in toggled.items() if not v]
-        embed = discord.Embed(
-            title="🛠 Event Logger Settings", color=discord.Color.blurple()
-        )
-        embed.add_field(
-            name="Log Channel",
-            value=log_channel.mention if log_channel else "Not Set",
-            inline=False,
-        )
-        embed.add_field(
-            name="Enabled Events", value=", ".join(enabled) or "None", inline=False
-        )
-        embed.add_field(
-            name="Disabled Events", value=", ".join(disabled) or "None", inline=False
-        )
-        await ctx.send(embed=embed)
+    @commands.Cog.listener()
+    async def on_user_update(self, before, after):
+        pass  # optional future use
 
-    # ======== Event Handlers ========
-
-    async def send_log(self, guild: discord.Guild, content: str):
-        log_channel = await self.get_log_channel(guild)
-        if log_channel:
-            await log_channel.send(content)
-
-    # Guild events
-    async def on_guild_join(self, guild):
-        await self.send_if_enabled(guild, "✅ Bot joined a server.")
-
-    async def on_guild_remove(self, guild):
-        await self.send_if_enabled(guild, "❌ Bot removed from a server.")
-
-    # Member events
-    async def on_member_join(self, member):
-        await self.send_if_enabled(member.guild, f"👤 {member} joined.")
-
-    async def on_member_remove(self, member):
-        await self.send_if_enabled(member.guild, f"👋 {member} left.")
-
-    async def on_member_ban(self, guild, user):
-        await self.send_if_enabled(guild, f"🔨 {user} was banned.")
-
-    async def on_member_unban(self, guild, user):
-        await self.send_if_enabled(guild, f"⚖️ {user} was unbanned.")
-
-    # Role events
-    async def on_guild_role_create(self, role):
-        await self.send_if_enabled(role.guild, f"➕ Role created: `{role.name}`")
-
-    async def on_guild_role_delete(self, role):
-        await self.send_if_enabled(role.guild, f"➖ Role deleted: `{role.name}`")
-
-    async def on_guild_role_update(self, before, after):
-        await self.send_if_enabled(
-            after.guild, f"♻️ Role updated: `{before.name}` → `{after.name}`"
-        )
-
-    # Channel events
+    @commands.Cog.listener()
     async def on_guild_channel_create(self, channel):
-        await self.send_if_enabled(
-            channel.guild, f"📁 Channel created: {channel.mention}"
-        )
+        if await self._should_log(channel.guild, "channel_create"):
+            embed = self._format_embed(
+                "Channel Created", f"{channel.name} ({channel.id})"
+            )
+            await self._log(channel.guild, embed)
 
+    @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel):
-        await self.send_if_enabled(
-            channel.guild, f"📁 Channel deleted: `{channel.name}`"
-        )
+        if await self._should_log(channel.guild, "channel_delete"):
+            embed = self._format_embed(
+                "Channel Deleted", f"{channel.name} ({channel.id})"
+            )
+            await self._log(channel.guild, embed)
 
+    @commands.Cog.listener()
     async def on_guild_channel_update(self, before, after):
-        await self.send_if_enabled(
-            after.guild, f"📁 Channel updated: `{before.name}` → `{after.name}`"
-        )
+        if await self._should_log(after.guild, "channel_update"):
+            embed = self._format_embed(
+                "Channel Updated", f"{before.name} → {after.name}"
+            )
+            await self._log(after.guild, embed)
 
-    # Emoji events
-    async def on_guild_emojis_update(self, guild, before, after):
-        if not await self.should_log(guild, "emoji_update"):
-            return
-        if len(before) < len(after):
-            added = set(after) - set(before)
-            for emoji in added:
-                await self.send_log(guild, f"😃 Emoji added: {emoji}")
-        elif len(before) > len(after):
-            removed = set(before) - set(after)
-            for emoji in removed:
-                await self.send_log(guild, f"😢 Emoji removed: `{emoji.name}`")
-        else:
-            await self.send_log(guild, f"🌀 Emoji updated.")
-
+    @commands.Cog.listener()
     async def on_guild_update(self, before, after):
-        await self.send_if_enabled(after, "🏠 Guild settings updated.")
-
-    # Message edits/deletes (excluded in logchannel)
-    async def on_message_delete(self, message):
-        if message.guild and await self.should_log(
-            message.guild, "message_delete", message.channel
-        ):
-            await self.send_log(
-                message.guild,
-                f"❌ Message deleted in {message.channel.mention} by {message.author}: `{message.content}`",
+        if await self._should_log(after, "guild_update"):
+            embed = self._format_embed(
+                "Guild Updated", f"Possible server setting changes."
             )
+            await self._log(after, embed)
 
-    async def on_message_edit(self, before, after):
-        if before.guild and await self.should_log(
-            before.guild, "message_edit", before.channel
-        ):
-            await self.send_log(
-                before.guild,
-                f"✏️ Message edited in {before.channel.mention} by {before.author}:\n**Before:** {before.content}\n**After:** {after.content}",
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role):
+        if await self._should_log(role.guild, "role_create"):
+            embed = self._format_embed("Role Created", role.name)
+            await self._log(role.guild, embed)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role):
+        if await self._should_log(role.guild, "role_delete"):
+            embed = self._format_embed("Role Deleted", role.name)
+            await self._log(role.guild, embed)
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before, after):
+        if await self._should_log(after.guild, "role_update"):
+            embed = self._format_embed("Role Updated", f"{before.name} → {after.name}")
+            await self._log(after.guild, embed)
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild, user):
+        if await self._should_log(guild, "ban"):
+            embed = self._format_embed("Member Banned", f"{user.name}")
+            await self._log(guild, embed)
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild, user):
+        if await self._should_log(guild, "unban"):
+            embed = self._format_embed("Member Unbanned", f"{user.name}")
+            await self._log(guild, embed)
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: Message, after: Message):
+        guild = before.guild
+        if guild is None:
+            return
+        log_channel_id = await self.config.guild(guild).log_channel()
+        if before.channel.id == log_channel_id:
+            return
+        if await self._should_log(guild, "message_edit"):
+            embed = self._format_embed(
+                "Message Edited",
+                f"Author: {before.author.mention}\nBefore: {before.content}\nAfter: {after.content}",
             )
+            await self._log(guild, embed)
 
-    async def send_if_enabled(self, guild, content: str, event: Optional[str] = None):
-        if event is None:
-            # Try inferring the event from caller function name (not always accurate)
-            event = inspect.stack()[1].function.replace("on_", "")
-        if await self.should_log(guild, event):
-            await self.send_log(guild, content)
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: Message):
+        guild = message.guild
+        if guild is None:
+            return
+        log_channel_id = await self.config.guild(guild).log_channel()
+        if message.channel.id == log_channel_id:
+            return
+        if await self._should_log(guild, "message_delete"):
+            embed = self._format_embed(
+                "Message Deleted",
+                f"Author: {message.author.mention}\nContent: {message.content}",
+            )
+            await self._log(guild, embed)
