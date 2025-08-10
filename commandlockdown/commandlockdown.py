@@ -1,99 +1,130 @@
 import discord
 from redbot.core import commands, Config, checks
 from redbot.core.utils.chat_formatting import box
+from typing import List
 
 
 class CommandLockdown(commands.Cog):
-    """Lock down bot commands to specific roles or cogs."""
+    """Lock down specific cogs to certain roles."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(
-            self, identifier=1234567890, force_registration=True
-        )
+        self.config = Config.get_conf(self, identifier=9876543210)
         default_guild = {
-            "locked": False,
-            "trusted_roles": {},  # role_id: list of cogs or ["all"]
+            "lockdown": False,
+            "trusted_roles": [],
+            "semi_trusted_roles": {},  # {role_id: [cog_names]}
         }
         self.config.register_guild(**default_guild)
 
     async def cog_check(self, ctx):
-        """Block commands when locked unless trusted."""
-        locked = await self.config.guild(ctx.guild).locked()
-        if not locked:
+        # Always allow owner to run everything
+        if await self.bot.is_owner(ctx.author):
             return True
-        trusted_roles = await self.config.guild(ctx.guild).trusted_roles()
-        user_role_ids = {r.id for r in ctx.author.roles}
-        for rid, cogs in trusted_roles.items():
-            if int(rid) in user_role_ids:
-                if "all" in cogs or ctx.cog.__class__.__name__ in cogs:
+
+        # Special case: `.cl` commands are *always* owner-only
+        if ctx.command and ctx.command.qualified_name.startswith("cl"):
+            return False
+
+        lockdown = await self.config.guild(ctx.guild).lockdown()
+        if not lockdown:
+            return True
+
+        trusted = await self.config.guild(ctx.guild).trusted_roles()
+        semi_trusted = await self.config.guild(ctx.guild).semi_trusted_roles()
+
+        # Full trust check
+        if any(r.id in trusted for r in ctx.author.roles):
+            return True
+
+        # Semi-trust check for cog-specific access
+        for role in ctx.author.roles:
+            if str(role.id) in semi_trusted:
+                allowed_cogs = semi_trusted[str(role.id)]
+                if ctx.cog and ctx.cog.qualified_name in allowed_cogs:
                     return True
         return False
 
-    @commands.group(name="cl", invoke_without_command=True)
-    @checks.admin_or_permissions(administrator=True)
+    @commands.group()
+    @checks.is_owner()
     async def cl(self, ctx):
         """Command lockdown settings."""
-        await ctx.send_help()
+        pass
 
     @cl.command()
-    @checks.admin_or_permissions(administrator=True)
     async def toggle(self, ctx):
-        """Toggle command lockdown on/off."""
-        current = await self.config.guild(ctx.guild).locked()
-        await self.config.guild(ctx.guild).locked.set(not current)
-        await ctx.send(f"🔒 Lockdown {'enabled' if not current else 'disabled'}.")
-
-    @cl.command()
-    @checks.admin_or_permissions(administrator=True)
-    async def trust(self, ctx, role: discord.Role, *cogs):
-        """Trust a role for specific cogs or 'all'."""
-        trusted = await self.config.guild(ctx.guild).trusted_roles()
-        role_id = str(role.id)
-        trusted[role_id] = ["all"] if "all" in [c.lower() for c in cogs] else list(cogs)
-        await self.config.guild(ctx.guild).trusted_roles.set(trusted)
-        await ctx.send(f"✅ {role.name} trusted for: {', '.join(trusted[role_id])}")
-
-    @cl.command()
-    @checks.admin_or_permissions(administrator=True)
-    async def untrust(self, ctx, role: discord.Role):
-        """Remove a trusted role."""
-        trusted = await self.config.guild(ctx.guild).trusted_roles()
-        role_id = str(role.id)
-        if role_id in trusted:
-            del trusted[role_id]
-            await self.config.guild(ctx.guild).trusted_roles.set(trusted)
-            await ctx.send(f"❌ {role.name} untrusted.")
-        else:
-            await ctx.send("That role isn't trusted.")
+        """Toggle lockdown on/off."""
+        guild_conf = self.config.guild(ctx.guild)
+        state = not (await guild_conf.lockdown())
+        await guild_conf.lockdown.set(state)
+        await ctx.send(f"🔒 Lockdown {'enabled' if state else 'disabled'}.")
 
     @cl.command()
     async def status(self, ctx):
-        """Show lockdown status and trusted roles."""
-        locked = await self.config.guild(ctx.guild).locked()
+        """Show lockdown status and role access."""
+        lockdown = await self.config.guild(ctx.guild).lockdown()
         trusted_roles = await self.config.guild(ctx.guild).trusted_roles()
+        semi_trusted = await self.config.guild(ctx.guild).semi_trusted_roles()
+
+        trusted_mentions = [
+            ctx.guild.get_role(r).mention
+            for r in trusted_roles
+            if ctx.guild.get_role(r)
+        ]
+        semi_trusted_display = []
+        for role_id, cogs in semi_trusted.items():
+            role = ctx.guild.get_role(int(role_id))
+            if role:
+                semi_trusted_display.append(f"{role.mention}: {', '.join(cogs)}")
+
         embed = discord.Embed(
-            title="Command Lockdown Status",
-            color=discord.Color.red() if locked else discord.Color.green(),
+            title="Command Lockdown Status", color=discord.Color.blurple()
         )
         embed.add_field(
-            name="Lockdown",
-            value="🔒 Enabled" if locked else "🔓 Disabled",
+            name="Lockdown Active",
+            value="✅ Yes" if lockdown else "❌ No",
             inline=False,
         )
-        if trusted_roles:
-            role_list = []
-            for rid, cogs in trusted_roles.items():
-                role_obj = ctx.guild.get_role(int(rid))
-                if role_obj:
-                    role_list.append(f"**{role_obj.name}** → {', '.join(cogs)}")
-            embed.add_field(
-                name="Trusted Roles", value="\n".join(role_list), inline=False
-            )
-        else:
-            embed.add_field(name="Trusted Roles", value="None", inline=False)
+        embed.add_field(
+            name="Trusted Roles (Full Access)",
+            value=", ".join(trusted_mentions) or "None",
+            inline=False,
+        )
+        embed.add_field(
+            name="Semi-Trusted Roles (Cog-Specific)",
+            value="\n".join(semi_trusted_display) or "None",
+            inline=False,
+        )
+
         await ctx.send(embed=embed)
 
+    @cl.command()
+    async def trust(self, ctx, role: discord.Role, *cogs: str):
+        """Trust a role fully or for specific cogs."""
+        if not cogs or cogs[0].lower() == "all":
+            async with self.config.guild(ctx.guild).trusted_roles() as trusted:
+                if role.id not in trusted:
+                    trusted.append(role.id)
+            await ctx.send(
+                f"✅ {role.mention} now has **full access** during lockdown."
+            )
+        else:
+            async with self.config.guild(
+                ctx.guild
+            ).semi_trusted_roles() as semi_trusted:
+                semi_trusted[str(role.id)] = list(cogs)
+            await ctx.send(
+                f"✅ {role.mention} now has **access to cogs:** {', '.join(cogs)} during lockdown."
+            )
 
-async def setup(bot):
-    await bot.add_cog(CommandLockdown(bot))
+    @cl.command()
+    async def untrust(self, ctx, role: discord.Role):
+        """Remove a role's trust."""
+        async with self.config.guild(ctx.guild).trusted_roles() as trusted:
+            if role.id in trusted:
+                trusted.remove(role.id)
+        async with self.config.guild(ctx.guild).semi_trusted_roles() as semi_trusted:
+            semi_trusted.pop(str(role.id), None)
+        await ctx.send(
+            f"❌ {role.mention} no longer has special access during lockdown."
+        )
