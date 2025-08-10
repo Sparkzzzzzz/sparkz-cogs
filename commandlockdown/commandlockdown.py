@@ -84,13 +84,15 @@ class CommandLockdown(commands.Cog):
         guild_conf = await self.config.guild(ctx.guild).all()
         lockdown_status = "ON 🔒" if guild_conf["lockdown"] else "OFF 🔓"
         trusted_roles = guild_conf["trusted_roles"]
+
         if trusted_roles:
             trusted_str = "\n".join(
-                f"**{ctx.guild.get_role(rid).name if ctx.guild.get_role(rid) else rid}** → {', '.join(cogs)}"
+                f"**{(role.name if (role := ctx.guild.get_role(rid)) else str(rid))}** → {', '.join(cogs)}"
                 for rid, cogs in trusted_roles.items()
             )
         else:
             trusted_str = "None"
+
         embed = discord.Embed(
             title="Command Lockdown Status",
             color=(
