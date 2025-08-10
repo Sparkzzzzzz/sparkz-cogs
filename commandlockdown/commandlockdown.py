@@ -1,6 +1,5 @@
 import discord
-from discord.ext import commands
-from redbot.core import Config, checks, commands as redcommands
+from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
 
 
@@ -8,6 +7,7 @@ class CommandLockdown(commands.Cog):
     """Lock down command usage to certain roles per cog."""
 
     def __init__(self, bot: Red):
+        super().__init__()
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890)
         default_guild = {"lockdown": False, "trusted_roles": {}}  # role_id: [cog_names]
@@ -43,7 +43,7 @@ class CommandLockdown(commands.Cog):
             "🚫 Lockdown is active. You are not allowed to use this command."
         )
 
-    @redcommands.group(name="cl", invoke_without_command=True)
+    @commands.group(name="cl", invoke_without_command=True)
     @checks.is_owner()
     async def cl_group(self, ctx):
         """Manage Command Lockdown."""
@@ -86,7 +86,9 @@ class CommandLockdown(commands.Cog):
             for rid, cogs in guild_conf["trusted_roles"].items():
                 role_obj = ctx.guild.get_role(int(rid))
                 role_name = role_obj.name if role_obj else f"Unknown Role ({rid})"
-                role_lines.append(f"**{role_name}** → {', '.join(cogs)}")
+                role_lines.append(
+                    f"**{role_name}** → {', '.join(cogs) if cogs else 'All'}"
+                )
             embed.add_field(
                 name="Trusted Roles", value="\n".join(role_lines), inline=False
             )
@@ -95,5 +97,5 @@ class CommandLockdown(commands.Cog):
         await ctx.send(embed=embed)
 
 
-def setup(bot: Red):
-    bot.add_cog(CommandLockdown(bot))
+async def setup(bot: Red):
+    await bot.add_cog(CommandLockdown(bot))
