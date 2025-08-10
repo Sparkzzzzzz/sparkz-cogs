@@ -1,6 +1,5 @@
 import discord
-from discord.ext import commands
-from redbot.core import commands as redcommands, Config, checks
+from redbot.core import commands, Config, checks
 
 
 class CommandLockdown(commands.Cog):
@@ -48,7 +47,7 @@ class CommandLockdown(commands.Cog):
                 "Lockdown in effect. You are not allowed to use this command."
             )
 
-    @redcommands.group(name="cl")
+    @commands.group(name="cl")
     @checks.is_owner()
     async def cl_group(self, ctx):
         """Command Lockdown settings."""
