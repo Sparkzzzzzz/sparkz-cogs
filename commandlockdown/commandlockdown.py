@@ -1,6 +1,5 @@
 import discord
-from discord.ext import commands
-from redbot.core import commands as red_commands, Config
+from redbot.core import commands, Config
 
 
 class CommandLockdown(commands.Cog):
@@ -24,7 +23,7 @@ class CommandLockdown(commands.Cog):
 
         guild = ctx.guild
         if not guild:
-            return True  # DMs are fine
+            return True  # Allow in DMs
 
         data = await self.config.guild(guild).all()
         if not data["lockdown_enabled"]:
@@ -43,9 +42,9 @@ class CommandLockdown(commands.Cog):
 
         return False
 
-    @red_commands.group()
-    @red_commands.guild_only()
-    @red_commands.admin()
+    @commands.group()
+    @commands.guild_only()
+    @commands.admin()
     async def cl(self, ctx):
         """Command Lockdown controls."""
 
@@ -109,5 +108,5 @@ class CommandLockdown(commands.Cog):
             await ctx.send("That role is not trusted.")
 
 
-def setup(bot):
-    bot.add_cog(CommandLockdown(bot))
+async def setup(bot):
+    await bot.add_cog(CommandLockdown(bot))
