@@ -74,10 +74,12 @@ class TeModlog(EventMixin, commands.Cog):
         )
         self.audit_log: Dict[int, Deque[discord.AuditLogEntry]] = {}
 
-    # --- helper to find deleter from audit logs ---
+        # --- helper to find deleter from audit logs ---
+
     async def _find_delete_responsible_user(
         self, message: discord.Message
     ) -> Optional[discord.User]:
+        """Check audit logs for who deleted a given message."""
         try:
             async for entry in message.guild.audit_logs(
                 limit=6, action=discord.AuditLogAction.message_delete
@@ -94,51 +96,46 @@ class TeModlog(EventMixin, commands.Cog):
         return None
 
     # --- improved on_message_delete ---
+    async def on_message_delete(self, message: discord.Message):
+        """Delete logging with guaranteed correct self-delete handling."""
+        if not message.guild:
+            return
 
+        if message.guild.id not in self.settings:
+            self.settings[message.guild.id] = await self.config.guild(
+                message.guild
+            ).all()
 
-async def on_message_delete(self, message: discord.Message):
-    """Delete logging with strict self-delete detection to avoid mismatches."""
-    if not message.guild:
-        return
+        # Ignore if channel is in ignored list
+        if message.channel.id in self.settings[message.guild.id].get(
+            "ignored_channels", []
+        ):
+            return
 
-    if message.guild.id not in self.settings:
-        self.settings[message.guild.id] = await self.config.guild(message.guild).all()
-
-    # Ignore if channel is in ignored list
-    if message.channel.id in self.settings[message.guild.id].get(
-        "ignored_channels", []
-    ):
-        return
-
-    # If author is known and deletion is self-initiated
-    if message.author and message.author.id != self.bot.user.id:
-        # If no audit log for this message, assume self-delete
-        deleter = await self._find_delete_responsible_user(message)
-        if deleter is None or deleter.id == message.author.id:
+        # Self-delete path (skip audit logs entirely)
+        if message.author and not message.author.bot:
             deleter_text = "Deleted by Author"
         else:
-            deleter_text = f"Deleted by {deleter} ({deleter.id})"
-    else:
-        # Fallback for cases where author is missing
-        deleter = await self._find_delete_responsible_user(message)
-        if deleter:
-            deleter_text = f"Deleted by {deleter} ({deleter.id})"
-        else:
-            deleter_text = "Deleted by Unknown"
+            # Only check audit logs if it's not a self-delete
+            deleter = await self._find_delete_responsible_user(message)
+            if deleter:
+                deleter_text = f"Deleted by {deleter} ({deleter.id})"
+            else:
+                deleter_text = "Deleted by Unknown"
 
-    log_channel = await modlog.get_modlog_channel(message.guild)
-    if not log_channel:
-        return
+        log_channel = await modlog.get_modlog_channel(message.guild)
+        if not log_channel:
+            return
 
-    try:
-        content_display = getattr(message, "content", None) or "[no text]"
-        await log_channel.send(
-            f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
-            f"{deleter_text}\n"
-            f"Content: {content_display}"
-        )
-    except discord.Forbidden:
-        logger.warning("No permission to send delete log in %s", log_channel)
+        try:
+            content_display = getattr(message, "content", None) or "[no text]"
+            await log_channel.send(
+                f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
+                f"{deleter_text}\n"
+                f"Content: {content_display}"
+            )
+        except discord.Forbidden:
+            logger.warning("No permission to send delete log in %s", log_channel)
 
     def decorator(func):
         old = func.__doc__ or ""
