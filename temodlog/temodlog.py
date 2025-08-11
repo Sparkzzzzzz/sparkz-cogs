@@ -65,7 +65,6 @@ class TeModlog(EventMixin, commands.Cog):
         self.bot = bot
         self._message_cache = {}  # {guild_id: {message_id: author_id}}
 
-        # --- keep all your original init code below ---
         self.config = Config.get_conf(
             self, identifier=8989823498234, force_registration=True
         )
