@@ -214,7 +214,7 @@ class TeModlog(EventMixin, commands.Cog):
         await self.modlog_settings(ctx)
 
     # The rest of the commands are kept largely intact but will call ensure_settings as needed.
-    @modlog.command(name="settings")
+    @modlog.command(name="viewsettings")
     async def modlog_show(self, ctx: commands.Context):
         await self._show_modlog_settings(ctx)
 
