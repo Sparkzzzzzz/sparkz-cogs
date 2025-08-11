@@ -184,7 +184,7 @@ class TeModlog(EventMixin, commands.Cog):
             for key, value in self.settings[guild.id].items():
                 all_settings[key] = value
 
-    @_modlog.command(name="settings")
+    @modlog.command(name="settings")
     async def _show_modlog_settings(self, ctx: commands.Context):
         """
         Show the servers current ExtendedModlog settings
@@ -193,7 +193,7 @@ class TeModlog(EventMixin, commands.Cog):
             await self.ensure_settings(ctx.guild)
         await self.modlog_settings(ctx)
 
-    @_modlog.command(name="all", aliaes=["all_settings", "toggle_all"])
+    @modlog.command(name="all", aliaes=["all_settings", "toggle_all"])
     async def _toggle_all_logs(self, ctx: commands.Context, true_or_false: bool) -> None:
         """
         Turn all logging options on or off.
@@ -207,7 +207,7 @@ class TeModlog(EventMixin, commands.Cog):
         await self.modlog_settings(ctx)
 
     # The rest of the commands are kept largely intact but will call ensure_settings as needed.
-    @_modlog.command(name="settings")
+    @modlog.command(name="settings")
     async def modlog_show(self, ctx: commands.Context):
         await self._show_modlog_settings(ctx)
 
