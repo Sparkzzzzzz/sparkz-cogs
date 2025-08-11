@@ -61,6 +61,13 @@ class TeModlog(EventMixin, commands.Cog):
     __author__ = ["RePulsar", "TrustyJAID"]
     __version__ = "2.12.6-patched-final"
 
+    @commands.group()
+    @commands.guild_only()
+    async def modlog(self, ctx):
+        """Base command for modlog settings."""
+        pass
+
+    
     def __init__(self, bot):
         self.bot = bot
         self._message_cache: Dict[int, Dict[int, int]] = {}  # {guild_id: {message_id: author_id}}
