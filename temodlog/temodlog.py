@@ -64,7 +64,16 @@ class TeModlog(EventMixin, commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._message_cache = {}  # {guild_id: {message_id: author_id}}
-        # existing init code...
+
+        # --- keep all your original init code below ---
+        self.config = Config.get_conf(
+            self, identifier=8989823498234, force_registration=True
+        )
+        self.settings = {}
+        self.logger = logging.getLogger("red.temodlog")
+        # register your config defaults if they were here originally
+        # self.config.register_guild(...)
+        # self.config.register_global(...)
 
     async def cog_unload(self):
         self.invite_links_loop.stop()
