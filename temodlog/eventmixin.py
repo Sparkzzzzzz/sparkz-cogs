@@ -199,6 +199,10 @@ class EventMixin:
         guild = ctx.guild
         if guild is None:
             return
+        try:
+            await self._ensure_guild_settings(guild)
+        except Exception:
+            pass
         if guild.id not in self.settings:
             return
         if await self.bot.cog_disabled_in_guild(self, ctx.guild):
@@ -448,10 +452,8 @@ class EventMixin:
         perp = None
         reason = None
         if channel.permissions_for(guild.me).view_audit_log and check_audit_log:
-            action = discord.AuditLogAction.message_delete
-            entry = await self.get_audit_log_entry(guild, message.author, action)
-            perp = getattr(entry, "user", None)
-            reason = getattr(entry, "reason", None)
+            entry, perp = await self._find_message_delete_audit_entry(guild, message)
+            reason = getattr(entry, "reason", None) if entry is not None else None
 
         replying = ""
         if message.reference and message.reference.resolved:
@@ -1135,6 +1137,61 @@ class EventMixin:
                         entry = log
         return entry
 
+
+    async def _find_message_delete_audit_entry(self, guild: discord.Guild, message: discord.Message, max_age_seconds: int = 6):
+        """Find a likely audit log entry for a message delete, matching by channel and time window.
+
+        Returns (entry, perp_user) or (None, None) if not found.
+        """
+        if guild is None or not guild.me.guild_permissions.view_audit_log:
+            return None, None
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # Check cached audit log entries first (most recent last)
+        if guild.id in self.audit_log:
+            for log in reversed(self.audit_log[guild.id]):
+                if log.action is not discord.AuditLogAction.message_delete:
+                    continue
+                # Some implementations put channel in extra
+                ch = getattr(log.extra, "channel", None)
+                if ch is not None:
+                    ch_id = getattr(ch, "id", None)
+                    if ch_id != getattr(message.channel, "id", None):
+                        continue
+                else:
+                    # Fallback to target id if present
+                    target_id = getattr(log.target, "id", None)
+                    if target_id is not None and target_id != getattr(message.channel, "id", None):
+                        continue
+                # Check time proximity
+                if (now - log.created_at).total_seconds() > max_age_seconds:
+                    continue
+                perp = getattr(log, "user", None)
+                # Avoid falsely attributing deletions to message author (author deletions don't make audit entries)
+                if perp and perp.id == getattr(message.author, "id", None):
+                    continue
+                return log, perp
+        # Fallback to fetching recent audit logs
+        try:
+            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.message_delete):
+                ch = getattr(entry.extra, "channel", None)
+                if ch is not None:
+                    ch_id = getattr(ch, "id", None)
+                    if ch_id != getattr(message.channel, "id", None):
+                        continue
+                else:
+                    target_id = getattr(entry.target, "id", None)
+                    if target_id is not None and target_id != getattr(message.channel, "id", None):
+                        continue
+                if (now - entry.created_at).total_seconds() > max_age_seconds:
+                    continue
+                perp = getattr(entry, "user", None)
+                if perp and perp.id == getattr(message.author, "id", None):
+                    continue
+                return entry, perp
+        except Exception:
+            # fall back silently if audit log reading fails
+            pass
+        return None, None
     @commands.Cog.listener()
     async def on_guild_channel_update(
         self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel
