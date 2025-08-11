@@ -53,6 +53,19 @@ def wrapped_additional_help():
 
 @cog_i18n(_)
 class TeModlog(EventMixin, commands.Cog):
+
+    async def ensure_settings(self, guild: discord.Guild):
+        """Ensure settings for this guild are loaded and have defaults."""
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
+        for key, default in inv_settings.items():
+            if key not in self.settings[guild.id]:
+                self.settings[guild.id][key] = default
+            elif isinstance(default, dict):
+                for sub_key, sub_default in default.items():
+                    if sub_key not in self.settings[guild.id][key]:
+                        self.settings[guild.id][key][sub_key] = sub_default
+
     """
     Extended modlogs
     Works with core modlogset channel

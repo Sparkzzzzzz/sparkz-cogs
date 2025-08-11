@@ -550,7 +550,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
-        guild_id = payload.guild_id
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+guild_id = payload.guild_id
         if guild_id is None:
             return
         guild = self.bot.get_guild(guild_id)
@@ -734,7 +736,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        guild = member.guild
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+guild = member.guild
         await self.ensure_settings(guild)
         if not self.settings[guild.id]["user_join"]["enabled"]:
             return
@@ -798,7 +802,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, member: discord.Member):
-        """
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+"""
         This is only used to track that the user was banned and not kicked/removed
         """
         if guild.id not in self._ban_cache:
@@ -808,7 +814,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        guild = member.guild
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+guild = member.guild
         await asyncio.sleep(5)
         if guild.id in self._ban_cache and member.id in self._ban_cache[guild.id]:
             # was a ban so we can leave early
@@ -1034,7 +1042,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, old_channel: discord.abc.GuildChannel):
-        guild = old_channel.guild
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+guild = old_channel.guild
         await self.ensure_settings(guild)
         if not self.settings[guild.id]["channel_delete"]["enabled"]:
             return
@@ -1097,7 +1107,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_audit_log_entry_create(self, entry: discord.AuditLogEntry):
-        if entry.guild.id not in self.audit_log:
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+if entry.guild.id not in self.audit_log:
             self.audit_log[entry.guild.id] = deque(maxlen=10)
         self.audit_log[entry.guild.id].append(entry)
 
@@ -2357,7 +2369,9 @@ class EventMixin:
 
     @commands.Cog.listener()
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent):
-        guild = self.bot.get_guild(payload.guild_id)
+                if hasattr(self, 'ensure_settings') and getattr(self, 'ensure_settings'):
+            await self.ensure_settings(getattr(message, 'guild', getattr(after, 'guild', getattr(member, 'guild', None))))
+guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
         await self.ensure_settings(guild)
