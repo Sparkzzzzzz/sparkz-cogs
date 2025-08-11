@@ -1,30 +1,26 @@
-from redbot.core import commands, Config
+import json
+from pathlib import Path
+from redbot.core import commands
+
 from .eventmixin import EventMixin
 
+# Load EUD statement if exists
+try:
+    with open(Path(__file__).parent / "info.json") as fp:
+        __red_end_user_data_statement__ = json.load(fp).get("end_user_data_statement")
+except Exception:
+    __red_end_user_data_statement__ = ""
 
-class TeModLog(commands.Cog, EventMixin):
-    """Temporary Extended ModLog with fixed deletion tracking."""
+
+class TeModLog(EventMixin, commands.Cog):
+    """Extended ModLog (Trusted Fork)"""
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=42069, force_registration=True)
-        default_guild = {"log_channel_id": None}
-        self.config.register_guild(**default_guild)
+        super().__init__(bot)
 
-    @commands.group()
-    @commands.guild_only()
+    @commands.group(name="temodlog", invoke_without_command=True)
+    @commands.bot_has_permissions(manage_guild=True)
     async def temodlog(self, ctx):
         """Manage TeModLog settings."""
-        if ctx.invoked_subcommand is None:
-            await ctx.send_help(ctx.command)
-
-    @temodlog.command()
-    @commands.admin()
-    async def setlog(self, ctx, channel: commands.TextChannelConverter):
-        """Set the log channel."""
-        await self.config.guild(ctx.guild).log_channel_id.set(channel.id)
-        await ctx.send(f"Log channel set to {channel.mention}")
-
-    @commands.Cog.listener()
-    async def on_message_delete(self, message):
-        await self.log_message_delete(message)
+        await ctx.send_help(ctx.command)
