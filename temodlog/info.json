@@ -1,13 +1,14 @@
 {
     "author": [
         "RePulsR",
-        "TrustyJAID"
+        "TrustyJAID",
+        "SparklyDev"
     ],
-    "description": "Log changes within the server using extended modlogs, an extension of RedBot cores modlog.",
+    "description": "Log changes within the server using extended modlogs, an extension of RedBot cores modlog.\n\nThis mod is a fork of TrustyJaid's ExtendedModlog.\n**I take no credit.**",
     "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
     "hidden": false,
-    "install_msg": "This cog is a fork of TrustyJAID's ExtendedModLog.\n**I take no credit for it**.\n\nThanks for installing. Use `[p]modlog` to see the available commands.",
+    "install_msg": "Thanks for installing. Use `[p]modlog` to see the available commands.",
     "max_bot_version": "0.0.0",
     "min_bot_version": "3.5.0",
     "min_python_version": [
@@ -15,13 +16,13 @@
         7,
         2
     ],
-    "name": "ExtendedModLog",
+    "name": "TeModlog",
     "permissions": [
         "embed_links"
     ],
     "required_cogs": {},
     "requirements": [],
-    "short": "ExtendedModLog, track changes made in the server.",
+    "short": "TeModlog, track changes made in the server.",
     "tags": [
         "mod",
         "logs",
