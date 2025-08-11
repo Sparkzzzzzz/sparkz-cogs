@@ -56,7 +56,7 @@ def wrapped_additional_help():
 
 
 @cog_i18n(_)
-class temodlog(EventMixin, commands.Cog):
+class TeModlog(EventMixin, commands.Cog):
     """
     Extended modlogs
     Works with core modlogset channel
