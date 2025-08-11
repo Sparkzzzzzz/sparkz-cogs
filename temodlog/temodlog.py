@@ -69,6 +69,7 @@ class TeModlog(EventMixin, commands.Cog):
         self.config = Config.get_conf(
             self, identifier=8989823498234, force_registration=True
         )
+        self.config.register_global(version="2.8.5")
         self.settings = {}
         self.logger = logging.getLogger("red.temodlog")
         # register your config defaults if they were here originally
