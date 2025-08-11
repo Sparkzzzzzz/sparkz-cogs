@@ -19,6 +19,7 @@ from redbot.core.utils.chat_formatting import (
     inline,
     pagify,
 )
+from .settings import inv_settings
 
 _ = i18n.Translator("TeModLog", __file__)
 logger = getLogger("red.trusty-cogs.TeModLog")
@@ -112,6 +113,34 @@ class EventChooser(Converter):
 
 
 class EventMixin:
+
+    async def ensure_settings(self, guild: discord.Guild) -> None:
+        """Ensure that guild settings exist in-memory, merging defaults if needed."""
+        if guild is None:
+            return
+        gid = guild.id
+        if gid not in self.settings:
+            try:
+                # try to load guild settings from config
+                self.settings[gid] = await self.config.guild(guild).all()
+            except Exception:
+                try:
+                    # fallback if guild object isn't usable
+                    self.settings[gid] = await self.config.guild_from_id(str(gid)).all()
+                except Exception:
+                    self.settings[gid] = {}
+        # Merge missing defaults from inv_settings
+        for key, default in inv_settings.items():
+            if key not in self.settings[gid]:
+                self.settings[gid][key] = default
+            elif isinstance(default, dict):
+                # ensure subkeys exist
+                if not isinstance(self.settings[gid][key], dict):
+                    self.settings[gid][key] = default
+                else:
+                    for sub_key, sub_default in default.items():
+                        if sub_key not in self.settings[gid][key]:
+                            self.settings[gid][key][sub_key] = sub_default
     """
     Handles all the on_event data
     """
@@ -199,12 +228,7 @@ class EventMixin:
         guild = ctx.guild
         if guild is None:
             return
-        try:
-            await self._ensure_guild_settings(guild)
-        except Exception:
-            pass
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, ctx.guild):
             return
         if not self.settings[guild.id]["commands_used"]["enabled"]:
@@ -369,8 +393,7 @@ class EventMixin:
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -452,7 +475,8 @@ class EventMixin:
         perp = None
         reason = None
         if channel.permissions_for(guild.me).view_audit_log and check_audit_log:
-            entry, perp = await self._find_message_delete_audit_entry(guild, message)
+            entry = await self._find_message_delete_audit_entry(guild, message)
+            perp = getattr(entry, "user", None) if entry is not None else None
             reason = getattr(entry, "reason", None) if entry is not None else None
 
         replying = ""
@@ -532,8 +556,7 @@ class EventMixin:
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -712,8 +735,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         guild = member.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["user_join"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -791,8 +813,7 @@ class EventMixin:
         if guild.id in self._ban_cache and member.id in self._ban_cache[guild.id]:
             # was a ban so we can leave early
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["user_left"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -951,8 +972,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_channel_create(self, new_channel: discord.abc.GuildChannel) -> None:
         guild = new_channel.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["channel_create"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -1015,8 +1035,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, old_channel: discord.abc.GuildChannel):
         guild = old_channel.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["channel_delete"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -1138,67 +1157,81 @@ class EventMixin:
         return entry
 
 
-    async def _find_message_delete_audit_entry(self, guild: discord.Guild, message: discord.Message, max_age_seconds: int = 6):
-        """Find a likely audit log entry for a message delete, matching by channel and time window.
-
-        Returns (entry, perp_user) or (None, None) if not found.
+    async def _find_message_delete_audit_entry(self, guild: discord.Guild, message: discord.Message, window_seconds: int = 6) -> Optional[discord.AuditLogEntry]:
+        """Try to find the most likely audit log entry for a message delete.
+        Heuristic: recent message_delete audit entries targeting the message's channel (or author),
+        within `window_seconds` of now, and where the executor is not the message author.
+        Uses the in-memory audit log cache first, then fetches recent audit logs if needed.
         """
-        if guild is None or not guild.me.guild_permissions.view_audit_log:
-            return None, None
         now = datetime.datetime.now(datetime.timezone.utc)
-        # Check cached audit log entries first (most recent last)
-        if guild.id in self.audit_log:
-            for log in reversed(self.audit_log[guild.id]):
-                if log.action is not discord.AuditLogAction.message_delete:
+        # Check cached audit logs first
+        entries = list(self.audit_log.get(guild.id, []))
+        for entry in reversed(entries):  # newest first
+            try:
+                if entry.action != discord.AuditLogAction.message_delete:
                     continue
-                # Some implementations put channel in extra
-                ch = getattr(log.extra, "channel", None)
-                if ch is not None:
-                    ch_id = getattr(ch, "id", None)
-                    if ch_id != getattr(message.channel, "id", None):
-                        continue
+            except Exception:
+                continue
+            # try to match channel
+            channel_id = None
+            extra = getattr(entry, 'extra', None)
+            if extra is not None:
+                channel_id = getattr(extra, 'channel_id', None) or getattr(extra, 'channel', None)
+                if hasattr(channel_id, 'id'):
+                    channel_id = getattr(channel_id, 'id', None)
+            if channel_id is None:
+                target_id = getattr(getattr(entry, 'target', None), 'id', None)
+                if target_id == getattr(message.author, 'id', None):
+                    channel_match = True
                 else:
-                    # Fallback to target id if present
-                    target_id = getattr(log.target, "id", None)
-                    if target_id is not None and target_id != getattr(message.channel, "id", None):
-                        continue
-                # Check time proximity
-                if (now - log.created_at).total_seconds() > max_age_seconds:
+                    channel_match = False
+            else:
+                channel_match = channel_id == getattr(message.channel, 'id', None)
+            if not channel_match:
+                continue
+            # time window
+            if (now - entry.created_at).total_seconds() <= window_seconds:
+                executor = getattr(entry, 'user', None)
+                if executor and getattr(executor, 'id', None) == getattr(message.author, 'id', None):
+                    # skip entries where executor is the author (self-deletes)
                     continue
-                perp = getattr(log, "user", None)
-                # Avoid falsely attributing deletions to message author (author deletions don't make audit entries)
-                if perp and perp.id == getattr(message.author, "id", None):
-                    continue
-                return log, perp
+                return entry
         # Fallback to fetching recent audit logs
         try:
-            async for entry in guild.audit_logs(limit=6, action=discord.AuditLogAction.message_delete):
-                ch = getattr(entry.extra, "channel", None)
-                if ch is not None:
-                    ch_id = getattr(ch, "id", None)
-                    if ch_id != getattr(message.channel, "id", None):
-                        continue
+            async for entry in guild.audit_logs(limit=10, action=discord.AuditLogAction.message_delete):
+                now = datetime.datetime.now(datetime.timezone.utc)
+                # match channel similar to above
+                channel_id = None
+                extra = getattr(entry, 'extra', None)
+                if extra is not None:
+                    channel_id = getattr(extra, 'channel_id', None) or getattr(extra, 'channel', None)
+                    if hasattr(channel_id, 'id'):
+                        channel_id = getattr(channel_id, 'id', None)
+                if channel_id is None:
+                    target_id = getattr(getattr(entry, 'target', None), 'id', None)
+                    if target_id == getattr(message.author, 'id', None):
+                        channel_match = True
+                    else:
+                        channel_match = False
                 else:
-                    target_id = getattr(entry.target, "id", None)
-                    if target_id is not None and target_id != getattr(message.channel, "id", None):
+                    channel_match = channel_id == getattr(message.channel, 'id', None)
+                if not channel_match:
+                    continue
+                if (now - entry.created_at).total_seconds() <= window_seconds:
+                    executor = getattr(entry, 'user', None)
+                    if executor and getattr(executor, 'id', None) == getattr(message.author, 'id', None):
                         continue
-                if (now - entry.created_at).total_seconds() > max_age_seconds:
-                    continue
-                perp = getattr(entry, "user", None)
-                if perp and perp.id == getattr(message.author, "id", None):
-                    continue
-                return entry, perp
+                    return entry
         except Exception:
-            # fall back silently if audit log reading fails
-            pass
-        return None, None
+            return None
+        return None
+
     @commands.Cog.listener()
     async def on_guild_channel_update(
         self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel
     ) -> None:
         guild = before.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1320,8 +1353,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
         guild = before.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1414,8 +1446,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role) -> None:
         guild = role.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1463,8 +1494,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role) -> None:
         guild = role.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1514,8 +1544,7 @@ class EventMixin:
         guild = before.guild
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1590,8 +1619,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild) -> None:
         guild = after
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1668,8 +1696,7 @@ class EventMixin:
     async def on_guild_emojis_update(
         self, guild: discord.Guild, before: Sequence[discord.Emoji], after: Sequence[discord.Emoji]
     ) -> None:
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1814,8 +1841,7 @@ class EventMixin:
         self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
     ) -> None:
         guild = member.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -1934,8 +1960,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         guild = before.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -2084,8 +2109,7 @@ class EventMixin:
         guild = self.bot.get_guild(invite.guild.id)
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -2185,8 +2209,7 @@ class EventMixin:
         guild = self.bot.get_guild(invite.guild.id)
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -2272,8 +2295,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread) -> None:
         guild = thread.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["thread_create"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -2338,8 +2360,7 @@ class EventMixin:
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if not self.settings[guild.id]["thread_delete"]["enabled"]:
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
@@ -2409,8 +2430,7 @@ class EventMixin:
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread) -> None:
         guild = before.guild
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
@@ -2508,8 +2528,7 @@ class EventMixin:
     async def on_guild_stickers_update(
         self, guild: discord.Guild, before: Sequence[discord.Emoji], after: Sequence[discord.Emoji]
     ) -> None:
-        if guild.id not in self.settings:
-            return
+        await self.ensure_settings(guild)
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
         if guild.me.is_timed_out():
