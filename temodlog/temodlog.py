@@ -11,8 +11,8 @@ from redbot.core.utils.chat_formatting import humanize_list
 from .eventmixin import CommandPrivs, EventChooser, EventMixin, MemberUpdateEnum
 from .settings import inv_settings
 
-_ = Translator("ExtendedModLog", __file__)
-logger = getLogger("red.trusty-cogs.ExtendedModLog")
+_ = Translator("TeModlog", __file__)
+logger = getLogger("red.trusty-cogs.TeModlog")
 
 
 def wrapped_additional_help():
@@ -59,7 +59,7 @@ class TeModlog(EventMixin, commands.Cog):
     """
 
     __author__ = ["RePulsar", "TrustyJAID", "PatchedByGPT"]
-    __version__ = "2.12.6-patched"
+    __version__ = "2.12.6-selfdeletefix"
 
     def __init__(self, bot):
         self.bot = bot
@@ -69,16 +69,18 @@ class TeModlog(EventMixin, commands.Cog):
         self.settings = {}
         self._ban_cache = {}
         self.invite_links_loop.start()
-        self.allowed_mentions = discord.AllowedMentions(users=False, roles=False, everyone=False)
+        self.allowed_mentions = discord.AllowedMentions(
+            users=False, roles=False, everyone=False
+        )
         self.audit_log: Dict[int, Deque[discord.AuditLogEntry]] = {}
 
-    # ------------- PATCH: Safe deleter lookup -------------
-    async def _find_delete_responsible_user(self, message: discord.Message) -> Optional[discord.User]:
-        """Return the responsible deleter for a given message, or None if no safe match found."""
+    # --- helper to find deleter from audit logs ---
+    async def _find_delete_responsible_user(
+        self, message: discord.Message
+    ) -> Optional[discord.User]:
         try:
             async for entry in message.guild.audit_logs(
-                limit=6,
-                action=discord.AuditLogAction.message_delete
+                limit=6, action=discord.AuditLogAction.message_delete
             ):
                 if (
                     entry.target.id == message.author.id
@@ -91,31 +93,36 @@ class TeModlog(EventMixin, commands.Cog):
             pass
         return None
 
-    
+    # --- improved on_message_delete ---
     async def on_message_delete(self, message: discord.Message):
-        """Improved delete logging with strict self-delete detection."""
+        """Delete logging with strict self-delete detection to avoid mismatches."""
         if not message.guild:
             return
 
         if message.guild.id not in self.settings:
-            self.settings[message.guild.id] = await self.config.guild(message.guild).all()
+            self.settings[message.guild.id] = await self.config.guild(
+                message.guild
+            ).all()
 
-        # Ignore channels that are in the ignored list
-        if message.channel.id in self.settings[message.guild.id].get("ignored_channels", []):
+        # Ignore if channel is in ignored list
+        if message.channel.id in self.settings[message.guild.id].get(
+            "ignored_channels", []
+        ):
             return
 
-        # Detect self-deletes (author removed their own message)
+        # If author is known and deletion is self-initiated
         if message.author and message.author.id != self.bot.user.id:
-            # If the deleter is the same as the author, no audit log entry will exist
-            deleter_text = "Deleted by Author"
+            # If no audit log for this message, assume self-delete
+            deleter = await self._find_delete_responsible_user(message)
+            if deleter is None or deleter.id == message.author.id:
+                deleter_text = "Deleted by Author"
+            else:
+                deleter_text = f"Deleted by {deleter} ({deleter.id})"
         else:
-            # Try audit log lookup for moderator deletes
+            # Fallback for cases where author is missing
             deleter = await self._find_delete_responsible_user(message)
             if deleter:
-                if message.author and deleter.id == message.author.id:
-                    deleter_text = "Deleted by Author"
-                else:
-                    deleter_text = f"Deleted by {deleter} ({deleter.id})"
+                deleter_text = f"Deleted by {deleter} ({deleter.id})"
             else:
                 deleter_text = "Deleted by Unknown"
 
@@ -126,8 +133,8 @@ class TeModlog(EventMixin, commands.Cog):
         try:
             content_display = getattr(message, "content", None) or "[no text]"
             await log_channel.send(
-                f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}"
-                f"{deleter_text}"
+                f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
+                f"{deleter_text}\n"
                 f"Content: {content_display}"
             )
         except discord.Forbidden:
