@@ -59,7 +59,7 @@ class TeModlog(EventMixin, commands.Cog):
     """
 
     __author__ = ["RePulsar", "TrustyJAID"]
-    __version__ = "2.12.5"
+    __version__ = "2.12.6-patched"
 
     def __init__(self, bot):
         self.bot = bot
@@ -113,6 +113,19 @@ class TeModlog(EventMixin, commands.Cog):
             logger.info("Saving guild %s data to new version type", guild_id)
             await self.config.guild(guild).set(all_data[guild_id])
         await self.config.version.set("2.8.5")
+
+
+    async def _ensure_guild_settings(self, guild: discord.Guild):
+        """Ensure the guild has all required settings from inv_settings."""
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
+        for key, default in inv_settings.items():
+            if key not in self.settings[guild.id]:
+                self.settings[guild.id][key] = default
+            elif isinstance(default, dict):
+                for sub_key, sub_default in default.items():
+                    if sub_key not in self.settings[guild.id][key]:
+                        self.settings[guild.id][key][sub_key] = sub_default
 
     async def modlog_settings(self, ctx: commands.Context) -> None:
         guild = ctx.message.guild
