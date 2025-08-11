@@ -97,7 +97,7 @@ class TeModlog(EventMixin, commands.Cog):
 
     # --- improved on_message_delete ---
     async def on_message_delete(self, message: discord.Message):
-        """Delete logging with guaranteed correct self-delete handling, even if message not cached."""
+        """Accurate delete logging with strict audit log filtering."""
         if not message.guild:
             return
 
@@ -110,22 +110,39 @@ class TeModlog(EventMixin, commands.Cog):
         ):
             return
 
-        # --- Self-delete aware decision ---
-        if message.author and message.author.id == self.bot.user.id:
-            # Bot's own message deleted
-            deleter_text = "Deleted by Bot"
-        elif message.author and not message.author.bot:
-            # Human deleted their own message, skip audit logs entirely
+        deleter_text = "Deleted by Unknown"
+
+        # Case 1: Author is known and is a human (self-delete)
+        if message.author and not message.author.bot:
             deleter_text = "Deleted by Author"
+
+        # Case 2: Author is bot (could be bot cleanup or mod)
+        elif message.author and message.author.bot:
+            deleter_text = "Deleted by Bot"
+
+        # Case 3: Author missing (uncached) → check filtered audit logs
         else:
-            # Author missing or is a bot, check audit logs
-            deleter = await self._find_delete_responsible_user(message)
-            if message.author and deleter and deleter.id == message.author.id:
-                deleter_text = "Deleted by Author"
-            elif deleter:
-                deleter_text = f"Deleted by {deleter} ({deleter.id})"
-            else:
-                deleter_text = "Deleted by Unknown"
+            try:
+                async for entry in message.guild.audit_logs(
+                    limit=3, action=discord.AuditLogAction.message_delete
+                ):
+                    # Skip if channel doesn't match
+                    if (
+                        not getattr(entry.extra, "channel", None)
+                        or entry.extra.channel.id != message.channel.id
+                    ):
+                        continue
+                    # Skip if timestamp difference > 3 sec
+                    if (discord.utils.utcnow() - entry.created_at).total_seconds() > 3:
+                        continue
+                    # Skip if bulk delete
+                    if getattr(entry.extra, "count", 1) != 1:
+                        continue
+
+                    deleter_text = f"Deleted by {entry.user} ({entry.user.id})"
+                    break
+            except discord.Forbidden:
+                pass
 
         log_channel = await modlog.get_modlog_channel(message.guild)
         if not log_channel:
@@ -134,19 +151,19 @@ class TeModlog(EventMixin, commands.Cog):
         try:
             content_display = getattr(message, "content", None) or "[no text]"
             await log_channel.send(
-                f"Message by {message.author} ({getattr(message.author, 'id', 'Unknown ID')}) "
-                f"deleted in {message.channel.mention}\n"
+                f"Message by {getattr(message.author, 'name', 'Unknown User')} "
+                f"({getattr(message.author, 'id', 'Unknown ID')}) deleted in {message.channel.mention}\n"
                 f"{deleter_text}\n"
                 f"Content: {content_display}"
             )
         except discord.Forbidden:
             logger.warning("No permission to send delete log in %s", log_channel)
 
-    def decorator(func):
-        old = func.__doc__ or ""
-        setattr(func, "__doc__", old + added_doc)
-        return func
-        return decorator
+        def decorator(func):
+            old = func.__doc__ or ""
+            setattr(func, "__doc__", old + added_doc)
+            return func
+            return decorator
 
 
 @cog_i18n(_)
