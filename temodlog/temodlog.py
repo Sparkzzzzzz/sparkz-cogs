@@ -63,21 +63,8 @@ class TeModlog(EventMixin, commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(self, 154457677895, force_registration=True)
-        self.config.register_guild(**inv_settings)
-        self.config.register_global(version="0.0.0")
-        self.settings = {}
-        self._ban_cache = {}
-        self.invite_links_loop.start()
-        self.allowed_mentions = discord.AllowedMentions(users=False, roles=False, everyone=False)
-        self.audit_log: Dict[int, Deque[discord.AuditLogEntry]] = {}
-
-    def format_help_for_context(self, ctx: commands.Context):
-        """
-        Thanks Sinbad!
-        """
-        pre_processed = super().format_help_for_context(ctx)
-        return f"{pre_processed}\n\nCog Version: {self.__version__}"
+        self._message_cache = {}  # {guild_id: {message_id: author_id}}
+        # existing init code...
 
     async def cog_unload(self):
         self.invite_links_loop.stop()
@@ -92,7 +79,9 @@ class TeModlog(EventMixin, commands.Cog):
         if await self.config.version() < "2.8.5":
             await self.migrate_2_8_5_settings()
         for guild_id in await self.config.all_guilds():
-            self.settings[int(guild_id)] = await self.config.guild_from_id(guild_id).all()
+            self.settings[int(guild_id)] = await self.config.guild_from_id(
+                guild_id
+            ).all()
 
     async def migrate_2_8_5_settings(self):
         all_data = await self.config.all_guilds()
@@ -226,7 +215,9 @@ class TeModlog(EventMixin, commands.Cog):
         - `<colour>` must be a hex code or a [built colour.](https://discordpy.readthedocs.io/en/latest/api.html#colour)
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         if colour:
@@ -254,7 +245,9 @@ class TeModlog(EventMixin, commands.Cog):
         - `<true_or_false>` The desired embed setting either on or off.
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         for event in events:
@@ -282,14 +275,18 @@ class TeModlog(EventMixin, commands.Cog):
         - `<new_emoji>` can be any discord emoji or unicode emoji the bot has access to use.
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         if isinstance(emoji, str):
             try:
                 await ctx.message.add_reaction(emoji)
             except discord.errors.HTTPException:
-                return await ctx.send(_("{emoji} is not a valid emoji.").format(emoji=emoji))
+                return await ctx.send(
+                    _("{emoji} is not a valid emoji.").format(emoji=emoji)
+                )
         new_emoji = str(emoji)
         for event in events:
             self.settings[ctx.guild.id][event]["emoji"] = new_emoji
@@ -315,7 +312,9 @@ class TeModlog(EventMixin, commands.Cog):
         - `<true_or_false>` Either on or off.
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         for event in events:
@@ -342,7 +341,9 @@ class TeModlog(EventMixin, commands.Cog):
         - `<channel>` The text channel to send the events to.
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         for event in events:
@@ -366,18 +367,24 @@ class TeModlog(EventMixin, commands.Cog):
         Reset the modlog event to the default modlog channel.
         """
         if len(events) == 0:
-            return await ctx.send(_("You must provide which events should be included."))
+            return await ctx.send(
+                _("You must provide which events should be included.")
+            )
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         for event in events:
             self.settings[ctx.guild.id][event]["channel"] = None
         await self.save(ctx.guild)
         await ctx.send(
-            _("{event} logs channel have been reset.").format(event=humanize_list(events))
+            _("{event} logs channel have been reset.").format(
+                event=humanize_list(events)
+            )
         )
 
     @_modlog.command(name="all", aliaes=["all_settings", "toggle_all"])
-    async def _toggle_all_logs(self, ctx: commands.Context, true_or_false: bool) -> None:
+    async def _toggle_all_logs(
+        self, ctx: commands.Context, true_or_false: bool
+    ) -> None:
         """
         Turn all logging options on or off.
 
@@ -424,7 +431,9 @@ class TeModlog(EventMixin, commands.Cog):
         if ctx.guild.id not in self.settings:
             self.settings[ctx.guild.id] = await self.config.guild(ctx.guild).all()
         guild = ctx.message.guild
-        msg = _("Individual message delete logs for bulk message delete {enabled_or_disabled}.")
+        msg = _(
+            "Individual message delete logs for bulk message delete {enabled_or_disabled}."
+        )
         if not await self.config.guild(guild).message_delete.bulk_individual():
             self.settings[ctx.guild.id]["message_delete"]["bulk_individual"] = True
             verb = _("enabled")
@@ -533,7 +542,9 @@ class TeModlog(EventMixin, commands.Cog):
                 ctx, _("Avatars will no longer be tracked in member change logs.")
             )
         else:
-            await self._members_settings(ctx, _("Avatars will be tracked in member change logs."))
+            await self._members_settings(
+                ctx, _("Avatars will be tracked in member change logs.")
+            )
 
     @_members.command(name="roles", aliases=["role"])
     async def _user_role_logging(self, ctx: commands.Context) -> None:
@@ -550,7 +561,9 @@ class TeModlog(EventMixin, commands.Cog):
                 ctx, _("Roles will no longer be tracked in member change logs.")
             )
         else:
-            await self._members_settings(ctx, _("Roles will be tracked in member change logs."))
+            await self._members_settings(
+                ctx, _("Roles will be tracked in member change logs.")
+            )
 
     @_members.command(name="pending")
     async def _user_pending_logging(self, ctx: commands.Context) -> None:
@@ -567,7 +580,9 @@ class TeModlog(EventMixin, commands.Cog):
                 ctx, _("Pending will no longer be tracked in member change logs.")
             )
         else:
-            await self._members_settings(ctx, _("Pending will be tracked in member change logs."))
+            await self._members_settings(
+                ctx, _("Pending will be tracked in member change logs.")
+            )
 
     @_members.command(name="timeout")
     async def _user_timeout_logging(self, ctx: commands.Context) -> None:
@@ -587,7 +602,9 @@ class TeModlog(EventMixin, commands.Cog):
                 ctx, _("Timeout will no longer be tracked in member change logs.")
             )
         else:
-            await self._members_settings(ctx, _("Timeout will be tracked in member change logs."))
+            await self._members_settings(
+                ctx, _("Timeout will be tracked in member change logs.")
+            )
 
     @_members.command(name="flags")
     async def _user_flags_logging(self, ctx: commands.Context) -> None:
@@ -684,7 +701,9 @@ class TeModlog(EventMixin, commands.Cog):
             cur_ignored.append(channel.id)
             self.settings[guild.id]["ignored_channels"] = cur_ignored
             await self.save(ctx.guild)
-            await ctx.send(_("Now ignoring events in {channel}.").format(channel=channel.mention))
+            await ctx.send(
+                _("Now ignoring events in {channel}.").format(channel=channel.mention)
+            )
         else:
             await ctx.send(
                 _("{channel} is already being ignored.").format(channel=channel.mention)
@@ -716,9 +735,13 @@ class TeModlog(EventMixin, commands.Cog):
             cur_ignored.remove(channel.id)
             self.settings[guild.id]["ignored_channels"] = cur_ignored
             await self.save(ctx.guild)
-            await ctx.send(_("Now tracking events in {channel}.").format(channel=channel.mention))
+            await ctx.send(
+                _("Now tracking events in {channel}.").format(channel=channel.mention)
+            )
         else:
-            await ctx.send(_("{channel} is not being ignored.").format(channel=channel.mention))
+            await ctx.send(
+                _("{channel} is not being ignored.").format(channel=channel.mention)
+            )
 
     @_modlog.group(name="bot", aliases=["bots"])
     async def _modlog_bot(self, ctx: commands.Context) -> None:
