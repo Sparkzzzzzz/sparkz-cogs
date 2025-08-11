@@ -52,7 +52,7 @@ def wrapped_additional_help():
 
 
 @cog_i18n(_)
-class ExtendedModLog(EventMixin, commands.Cog):
+class TeModlog(EventMixin, commands.Cog):
     """
     Extended modlogs
     Works with core modlogset channel
@@ -181,7 +181,7 @@ def wrapped_additional_help():
 
 
 @cog_i18n(_)
-class ExtendedModLog(EventMixin, commands.Cog):
+class TeModlog(EventMixin, commands.Cog):
     """
     Extended modlogs
     Works with core modlogset channel
