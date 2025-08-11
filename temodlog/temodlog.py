@@ -95,30 +95,43 @@ class TeModlog(EventMixin, commands.Cog):
         return None
 
     async def on_message_delete(self, message: discord.Message):
-        """Safe delete logging to prevent wrong deleter being shown."""
+        """Improved delete logging with proper own-delete and fallback handling."""
         if not message.guild:
             return
-        if message.guild.id not in self.settings:
-            self.settings[message.guild.id] = await self.config.guild(
-                message.guild
-            ).all()
 
-        deleter = await self._find_delete_responsible_user(message)
-        if deleter:
-            deleter_text = f"Deleted by {deleter} ({deleter.id})"
+        guild_settings = self.settings.get(message.guild.id) or await self.config.guild(message.guild).all()
+
+        # Respect ignored channels
+        if message.channel.id in guild_settings.get("ignored_channels", []):
+            return
+
+        # If author deleted their own message
+        if message.author == message.guild.me:
+            deleter_text = "Deleted by Bot"
+        elif message.author.id == getattr(message, "author", discord.Object(id=0)).id:
+            deleter_text = "Deleted by Author"
         else:
-            deleter_text = "Deleted by Unknown"
+            # Try finding deleter from audit logs
+            deleter = await self._find_delete_responsible_user(message)
+            if deleter:
+                deleter_text = f"Deleted by {deleter} ({deleter.id})"
+            else:
+                deleter_text = "Deleted by Unknown"
 
         log_channel = await modlog.get_modlog_channel(message.guild)
-        if log_channel:
-            try:
-                await log_channel.send(
-                    f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
-                    f"{deleter_text}\n"
-                    f"Content: {message.content if message.content else '[no text]'}"
-                )
-            except discord.Forbidden:
-                logger.warning("No permission to send delete log in %s", log_channel)
+        if not log_channel:
+            return
+
+        try:
+            content_display = message.content if getattr(message, "content", None) else "[no text]"
+            await log_channel.send(
+                f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
+                f"{deleter_text}\n"
+                f"Content: {content_display}"
+            )
+        except discord.Forbidden:
+            logger.warning("No permission to send delete log in %s", log_channel)
+
 
     # -------------------------------------------------------
 
