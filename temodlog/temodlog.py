@@ -97,14 +97,12 @@ class TeModlog(EventMixin, commands.Cog):
 
     # --- improved on_message_delete ---
     async def on_message_delete(self, message: discord.Message):
-        """Delete logging with guaranteed correct self-delete handling."""
+        """Delete logging with guaranteed correct self-delete handling, even if message not cached."""
         if not message.guild:
             return
 
         if message.guild.id not in self.settings:
-            self.settings[message.guild.id] = await self.config.guild(
-                message.guild
-            ).all()
+            self.settings[message.guild.id] = await self.config.guild(message.guild).all()
 
         # Ignore if channel is in ignored list
         if message.channel.id in self.settings[message.guild.id].get(
@@ -112,13 +110,19 @@ class TeModlog(EventMixin, commands.Cog):
         ):
             return
 
-        # Self-delete path (skip audit logs entirely)
-        if message.author and not message.author.bot:
+        # --- Self-delete aware decision ---
+        if message.author and message.author.id == self.bot.user.id:
+            # Bot's own message deleted
+            deleter_text = "Deleted by Bot"
+        elif message.author and not message.author.bot:
+            # Human deleted their own message, skip audit logs entirely
             deleter_text = "Deleted by Author"
         else:
-            # Only check audit logs if it's not a self-delete
+            # Author missing or is a bot, check audit logs
             deleter = await self._find_delete_responsible_user(message)
-            if deleter:
+            if message.author and deleter and deleter.id == message.author.id:
+                deleter_text = "Deleted by Author"
+            elif deleter:
                 deleter_text = f"Deleted by {deleter} ({deleter.id})"
             else:
                 deleter_text = "Deleted by Unknown"
@@ -130,7 +134,8 @@ class TeModlog(EventMixin, commands.Cog):
         try:
             content_display = getattr(message, "content", None) or "[no text]"
             await log_channel.send(
-                f"Message by {message.author} ({message.author.id}) deleted in {message.channel.mention}\n"
+                f"Message by {message.author} ({getattr(message.author, 'id', 'Unknown ID')}) "
+                f"deleted in {message.channel.mention}\n"
                 f"{deleter_text}\n"
                 f"Content: {content_display}"
             )
