@@ -10,6 +10,7 @@ class CommandLockdown(commands.Cog):
     - Role/User allow lists (full, cog-level, command-level)
     - Role/User deny lists (cog-level, command-level)
     - Deny always overrides allow
+    - Improved status display with multi-line tables
     """
 
     def __init__(self, bot: Red):
@@ -72,10 +73,7 @@ class CommandLockdown(commands.Cog):
         if member_input.isdigit():
             return ctx.guild.get_member(int(member_input))
         for m in ctx.guild.members:
-            if (
-                m.name.lower() == member_input.lower()
-                or f"{m.name.lower()}#{m.discriminator}" == member_input.lower()
-            ):
+            if m.name.lower() == member_input.lower() or f"{m.name.lower()}#{m.discriminator}" == member_input.lower():
                 return m
         return None
 
@@ -84,18 +82,14 @@ class CommandLockdown(commands.Cog):
         cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
         full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else None
         items_lower = {i.lower() for i in items}
-        return (cog_name and cog_name in items_lower) or (
-            full_cmd and full_cmd in items_lower
-        )
+        return (cog_name and cog_name in items_lower) or (full_cmd and full_cmd in items_lower)
 
     async def _global_lockdown_check(self, ctx):
         try:
             if await self.bot.is_owner(ctx.author):
                 return True
         except Exception:
-            if hasattr(self.bot, "owner_ids") and ctx.author.id in getattr(
-                self.bot, "owner_ids", set()
-            ):
+            if hasattr(self.bot, "owner_ids") and ctx.author.id in getattr(self.bot, "owner_ids", set()):
                 return True
         if ctx.guild is None:
             return True
@@ -109,9 +103,7 @@ class CommandLockdown(commands.Cog):
         user_roles = {str(r.id) for r in ctx.author.roles}
 
         # Deny check first
-        if str(ctx.author.id) in dr_users and await self._is_match(
-            dr_users[str(ctx.author.id)]["cogs"], ctx
-        ):
+        if str(ctx.author.id) in dr_users and await self._is_match(dr_users[str(ctx.author.id)]["cogs"], ctx):
             return False
         for rid, info in dr_roles.items():
             if rid in user_roles and await self._is_match(info["cogs"], ctx):
@@ -159,9 +151,7 @@ class CommandLockdown(commands.Cog):
         else:
             tr[str(role.id)] = {"access": "cogs", "cogs": list(items)}
         await self.config.guild(ctx.guild).trusted_roles.set(tr)
-        await ctx.send(
-            f"✅ Role {role.name} trusted for: {', '.join(items) if items else 'All'}"
-        )
+        await ctx.send(f"✅ Role {role.name} trusted for: {', '.join(items) if items else 'All'}")
 
     @cl.command()
     @checks.is_owner()
@@ -176,9 +166,7 @@ class CommandLockdown(commands.Cog):
         else:
             tu[str(member.id)] = {"access": "cogs", "cogs": list(items)}
         await self.config.guild(ctx.guild).trusted_users.set(tu)
-        await ctx.send(
-            f"✅ User {member} trusted for: {', '.join(items) if items else 'All'}"
-        )
+        await ctx.send(f"✅ User {member} trusted for: {', '.join(items) if items else 'All'}")
 
     @cl.command()
     @checks.is_owner()
@@ -214,65 +202,41 @@ class CommandLockdown(commands.Cog):
         """Show current lockdown status with trusted and denied lists."""
         data = await self.config.guild(ctx.guild).all()
 
-        def format_table(title, entries, is_user=False, show_access=False):
+        def format_multiline_table(title, entries, is_user=False, show_access=False):
             if not entries:
                 return f"**{title}:** None\n"
-            rows = []
+            lines = []
+            header = f"{title[:-1]:<25} Access/Items"
+            lines.append(header)
+            lines.append("-" * len(header))
             for id_, info in sorted(entries.items(), key=lambda x: x[0]):
-                obj = (
-                    ctx.guild.get_member(int(id_))
-                    if is_user
-                    else ctx.guild.get_role(int(id_))
-                )
-                name = (
-                    str(obj)
-                    if obj
-                    else f"[Unknown {'User' if is_user else 'Role'} {id_}]"
-                )
+                obj = ctx.guild.get_member(int(id_)) if is_user else ctx.guild.get_role(int(id_))
+                name = str(obj) if obj else f"[Unknown {'User' if is_user else 'Role'} {id_}]"
                 access = info.get("access", "")
-                items = "All" if access == "all" else ", ".join(info.get("cogs", []))
-                if not show_access:
-                    items = ", ".join(info.get("cogs", []))
-                rows.append(f"{name:<20} {items}")
-            return (
-                f"**{title}:**\n```{title[:-1]:<20} Access/Items\n{'-'*35}\n"
-                + "\n".join(rows)
-                + "```"
-            )
+                if access == "all":
+                    items_list = ["All"]
+                else:
+                    items_list = info.get("cogs", [])
+                # Wrap items to new lines if too long
+                if items_list:
+                    first_line = f"{name:<25} {items_list[0]}"
+                    lines.append(first_line)
+                    for item in items_list[1:]:
+                        lines.append(f"{'':<25} {item}")
+                else:
+                    lines.append(f"{name:<25} None")
+                lines.append("")  # Blank line between entries
+            return f"**{title}:**\n```" + "\n".join(lines) + "```"
 
         embed = discord.Embed(
             title="Command Lockdown Status",
             description=f"Lockdown Active: {'✅ Yes' if data['lockdown_enabled'] else '❌ No'}",
-            color=(
-                discord.Color.red()
-                if data["lockdown_enabled"]
-                else discord.Color.green()
-            ),
+            color=discord.Color.red() if data['lockdown_enabled'] else discord.Color.green()
         )
-        embed.add_field(
-            name="\u200b",
-            value=format_table(
-                "Trusted Roles", data["trusted_roles"], show_access=True
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="\u200b",
-            value=format_table(
-                "Trusted Users", data["trusted_users"], is_user=True, show_access=True
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="\u200b",
-            value=format_table("Denied Roles", data["denied_roles"]),
-            inline=False,
-        )
-        embed.add_field(
-            name="\u200b",
-            value=format_table("Denied Users", data["denied_users"], is_user=True),
-            inline=False,
-        )
+        embed.add_field(name="\u200b", value=format_multiline_table("Trusted Roles", data["trusted_roles"], show_access=True), inline=False)
+        embed.add_field(name="\u200b", value=format_multiline_table("Trusted Users", data["trusted_users"], is_user=True, show_access=True), inline=False)
+        embed.add_field(name="\u200b", value=format_multiline_table("Denied Roles", data["denied_roles"]), inline=False)
+        embed.add_field(name="\u200b", value=format_multiline_table("Denied Users", data["denied_users"], is_user=True), inline=False)
 
         await ctx.send(embed=embed)
 
