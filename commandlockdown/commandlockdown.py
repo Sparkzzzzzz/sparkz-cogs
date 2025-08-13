@@ -10,7 +10,6 @@ class CommandLockdown(commands.Cog):
     - Role/User allow lists (full or specific cogs/commands)
     - Only trust/untrust commands (no deny)
     - Improved status display with multi-line tables
-    - Owner blacklist (ob/uob)
     """
 
     def __init__(self, bot: Red):
@@ -267,81 +266,7 @@ class CommandLockdown(commands.Cog):
             inline=False,
         )
 
-    # ===== OWNER BLACKLIST =====
-    @cl.group(name="ob", invoke_without_command=True)
-    @checks.is_owner()
-    async def ob(self, ctx, target: str = None, *scopes: str):
-        """
-        Owner Blacklist a command or cog.
-        target: cog or cog.command
-        scopes: 'dm', 'all', server IDs or none (defaults to all)
-        """
-        if not hasattr(self, "owner_blacklist_config"):
-            self.owner_blacklist_config = Config.get_conf(
-                self, identifier=84738293049, force_registration=True
-            )
-            self.owner_blacklist_config.register_global(blacklist={})
-
-        blacklist = await self.owner_blacklist_config.blacklist()
-
-        target_key = target.lower() if target else "all"
-
-        # Determine scope
-        if not scopes:
-            scope_list = ["all"]
-        else:
-            scope_list = [
-                s.lower() if s.lower() in ("dm", "all") or s.isdigit() else s
-                for s in scopes
-            ]
-
-        for scope in scope_list:
-            if scope not in blacklist:
-                blacklist[scope] = []
-            if target_key not in blacklist[scope]:
-                blacklist[scope].append(target_key)
-
-        await self.owner_blacklist_config.blacklist.set(blacklist)
-        await ctx.send(
-            f"✅ Blacklisted `{target_key}` in scopes: {', '.join(scope_list)}"
-        )
-
-    @cl.group(name="uob", invoke_without_command=True)
-    @checks.is_owner()
-    async def uob(self, ctx, target: str = None, *scopes: str):
-        """
-        Owner Unblacklist a command or cog.
-        target: cog or cog.command
-        scopes: 'dm', 'all', server IDs or none (defaults to all)
-        """
-        if not hasattr(self, "owner_blacklist_config"):
-            self.owner_blacklist_config = Config.get_conf(
-                self, identifier=84738293049, force_registration=True
-            )
-            self.owner_blacklist_config.register_global(blacklist={})
-
-        blacklist = await self.owner_blacklist_config.blacklist()
-
-        target_key = target.lower() if target else "all"
-
-        if not scopes:
-            scope_list = list(blacklist.keys())
-        else:
-            scope_list = [
-                s.lower() if s.lower() in ("dm", "all") or s.isdigit() else s
-                for s in scopes
-            ]
-
-        for scope in scope_list:
-            if scope in blacklist and target_key in blacklist[scope]:
-                blacklist[scope].remove(target_key)
-                if not blacklist[scope]:
-                    blacklist.pop(scope)
-
-        await self.owner_blacklist_config.blacklist.set(blacklist)
-        await ctx.send(
-            f"✅ Unblacklisted `{target_key}` in scopes: {', '.join(scope_list)}"
-        )
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: Red):
