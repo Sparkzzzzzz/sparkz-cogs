@@ -12,6 +12,7 @@ class OwnerBlacklist(commands.Cog):
         self.config = Config.get_conf(
             self, identifier=92384723984723, force_registration=True
         )
+        # Always store lists, never sets, so it's JSON serializable
         self.config.register_global(blacklist={})
         bot.add_check(self._global_blacklist_check)
 
@@ -35,15 +36,24 @@ class OwnerBlacklist(commands.Cog):
         entry = bl_data[uid][scope_key]
 
         if entry.get("all", False):
+            await ctx.send(
+                "❌ Owner Blacklisted: All commands blocked for you in this scope."
+            )
             return False
 
         cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
         cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
         full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else cmd_name
 
-        if cog_name and cog_name in entry.get("cogs", set()):
+        if cog_name and cog_name in set(entry.get("cogs", [])):
+            await ctx.send(
+                f"❌ Owner Blacklisted: Cog `{cog_name}` is blocked for you in this scope."
+            )
             return False
-        if full_cmd and full_cmd in entry.get("commands", set()):
+        if full_cmd and full_cmd in set(entry.get("commands", [])):
+            await ctx.send(
+                f"❌ Owner Blacklisted: Command `{full_cmd}` is blocked for you in this scope."
+            )
             return False
 
         return True
@@ -51,7 +61,7 @@ class OwnerBlacklist(commands.Cog):
     @commands.group(name="ownerblacklist", aliases=["ob"])
     @checks.is_owner()
     async def ob_group(self, ctx):
-        """Manage owner blacklists."""
+        """Manage Owner Blacklists."""
         if ctx.invoked_subcommand is None:
             await ctx.send_help()
 
@@ -70,6 +80,7 @@ class OwnerBlacklist(commands.Cog):
         if uid not in bl_data:
             bl_data[uid] = {}
 
+        # Determine scope
         if scope.lower() == "dm":
             scope_key = "dm"
         elif scope.lower() == "guild":
@@ -84,16 +95,20 @@ class OwnerBlacklist(commands.Cog):
             return
 
         if scope_key not in bl_data[uid]:
-            bl_data[uid][scope_key] = {"all": False, "cogs": set(), "commands": set()}
+            bl_data[uid][scope_key] = {"all": False, "cogs": [], "commands": []}
 
         entry = bl_data[uid][scope_key]
 
         if target.lower() == "all":
             entry["all"] = True
         elif "." in target:
-            entry["commands"].add(target.lower())
+            commands_set = set(entry.get("commands", []))
+            commands_set.add(target.lower())
+            entry["commands"] = list(commands_set)
         else:
-            entry["cogs"].add(target.lower())
+            cogs_set = set(entry.get("cogs", []))
+            cogs_set.add(target.lower())
+            entry["cogs"] = list(cogs_set)
 
         bl_data[uid][scope_key] = entry
         await self.config.blacklist.set(bl_data)
@@ -136,9 +151,13 @@ class OwnerBlacklist(commands.Cog):
         if target.lower() == "all":
             entry["all"] = False
         elif "." in target:
-            entry["commands"].discard(target.lower())
+            commands_set = set(entry.get("commands", []))
+            commands_set.discard(target.lower())
+            entry["commands"] = list(commands_set)
         else:
-            entry["cogs"].discard(target.lower())
+            cogs_set = set(entry.get("cogs", []))
+            cogs_set.discard(target.lower())
+            entry["cogs"] = list(cogs_set)
 
         if not entry["all"] and not entry["cogs"] and not entry["commands"]:
             bl_data[uid].pop(scope_key)
