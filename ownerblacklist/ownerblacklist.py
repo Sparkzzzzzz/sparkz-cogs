@@ -22,7 +22,7 @@ class OwnerBlacklist(commands.Cog):
             pass
 
     async def _global_blacklist_check(self, ctx: commands.Context) -> bool:
-        """Check if a user is blacklisted before running any command."""
+        """Silently check if a user is blacklisted before running any command."""
         bl_data: Dict = await self.config.blacklist()
         uid = str(ctx.author.id)
         if uid not in bl_data:
@@ -32,22 +32,13 @@ class OwnerBlacklist(commands.Cog):
         if "all" in bl_data[uid]:
             entry = bl_data[uid]["all"]
             if entry.get("all", False):
-                await ctx.send(
-                    "❌ Owner Blacklisted: All commands blocked for you (global)."
-                )
                 return False
             cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
             cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
             full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else cmd_name
             if cog_name and cog_name in set(entry.get("cogs", [])):
-                await ctx.send(
-                    f"❌ Owner Blacklisted: Cog `{cog_name}` is blocked for you (global)."
-                )
                 return False
             if full_cmd and full_cmd in set(entry.get("commands", [])):
-                await ctx.send(
-                    f"❌ Owner Blacklisted: Command `{full_cmd}` is blocked for you (global)."
-                )
                 return False
 
         # Then check scope-specific
@@ -58,9 +49,6 @@ class OwnerBlacklist(commands.Cog):
         entry = bl_data[uid][scope_key]
 
         if entry.get("all", False):
-            await ctx.send(
-                "❌ Owner Blacklisted: All commands blocked for you in this scope."
-            )
             return False
 
         cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
@@ -68,14 +56,8 @@ class OwnerBlacklist(commands.Cog):
         full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else cmd_name
 
         if cog_name and cog_name in set(entry.get("cogs", [])):
-            await ctx.send(
-                f"❌ Owner Blacklisted: Cog `{cog_name}` is blocked for you in this scope."
-            )
             return False
         if full_cmd and full_cmd in set(entry.get("commands", [])):
-            await ctx.send(
-                f"❌ Owner Blacklisted: Command `{full_cmd}` is blocked for you in this scope."
-            )
             return False
 
         return True
