@@ -243,3 +243,4 @@ class CommandLockdown(commands.Cog):
 
 async def setup(bot: Red):
     await bot.add_cog(CommandLockdown(bot))
+# haha get tricked
