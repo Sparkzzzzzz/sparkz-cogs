@@ -12,7 +12,6 @@ class OwnerBlacklist(commands.Cog):
         self.config = Config.get_conf(
             self, identifier=92384723984723, force_registration=True
         )
-        # Always store lists, never sets, so it's JSON serializable
         self.config.register_global(blacklist={})
         bot.add_check(self._global_blacklist_check)
 
@@ -29,6 +28,29 @@ class OwnerBlacklist(commands.Cog):
         if uid not in bl_data:
             return True
 
+        # Check global "all" scope first
+        if "all" in bl_data[uid]:
+            entry = bl_data[uid]["all"]
+            if entry.get("all", False):
+                await ctx.send(
+                    "❌ Owner Blacklisted: All commands blocked for you (global)."
+                )
+                return False
+            cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
+            cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
+            full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else cmd_name
+            if cog_name and cog_name in set(entry.get("cogs", [])):
+                await ctx.send(
+                    f"❌ Owner Blacklisted: Cog `{cog_name}` is blocked for you (global)."
+                )
+                return False
+            if full_cmd and full_cmd in set(entry.get("commands", [])):
+                await ctx.send(
+                    f"❌ Owner Blacklisted: Command `{full_cmd}` is blocked for you (global)."
+                )
+                return False
+
+        # Then check scope-specific
         scope_key = "dm" if ctx.guild is None else str(ctx.guild.id)
         if scope_key not in bl_data[uid]:
             return True
@@ -81,7 +103,9 @@ class OwnerBlacklist(commands.Cog):
             bl_data[uid] = {}
 
         # Determine scope
-        if scope.lower() == "dm":
+        if scope.lower() == "all":
+            scope_key = "all"
+        elif scope.lower() == "dm":
             scope_key = "dm"
         elif scope.lower() == "guild":
             if ctx.guild is None:
@@ -91,7 +115,7 @@ class OwnerBlacklist(commands.Cog):
         elif scope.isdigit():
             scope_key = scope
         else:
-            await ctx.send("❌ Invalid scope. Use 'dm', 'guild', or a guild ID.")
+            await ctx.send("❌ Invalid scope. Use 'dm', 'guild', 'all', or a guild ID.")
             return
 
         if scope_key not in bl_data[uid]:
@@ -130,7 +154,9 @@ class OwnerBlacklist(commands.Cog):
             await ctx.send(f"❌ {user} has no Owner Blacklist entries.")
             return
 
-        if scope.lower() == "dm":
+        if scope.lower() == "all":
+            scope_key = "all"
+        elif scope.lower() == "dm":
             scope_key = "dm"
         elif scope.lower() == "guild":
             if ctx.guild is None:
@@ -187,7 +213,12 @@ class OwnerBlacklist(commands.Cog):
             data = bl_data[uid]
             lines = [f"Owner Blacklist for {user}:"]
             for scope, entry in data.items():
-                lines.append(f"  Scope: {scope}")
+                scope_label = (
+                    "Global"
+                    if scope == "all"
+                    else "DMs" if scope == "dm" else f"Guild {scope}"
+                )
+                lines.append(f"  Scope: {scope_label}")
                 if entry["all"]:
                     lines.append("    ALL commands blocked")
                 if entry["cogs"]:
@@ -202,7 +233,12 @@ class OwnerBlacklist(commands.Cog):
                 uname = str(user_obj) if user_obj else uid
                 lines.append(f"{uname}:")
                 for scope, entry in scopes.items():
-                    lines.append(f"  Scope: {scope}")
+                    scope_label = (
+                        "Global"
+                        if scope == "all"
+                        else "DMs" if scope == "dm" else f"Guild {scope}"
+                    )
+                    lines.append(f"  Scope: {scope_label}")
                     if entry["all"]:
                         lines.append("    ALL commands blocked")
                     if entry["cogs"]:
@@ -232,7 +268,11 @@ class OwnerBlacklist(commands.Cog):
             uname = str(user_obj) if user_obj else f"[Unknown User {uid}]"
             value_lines = []
             for scope, entry in scopes.items():
-                scope_title = "DMs" if scope == "dm" else f"Guild {scope}"
+                scope_title = (
+                    "Global"
+                    if scope == "all"
+                    else "DMs" if scope == "dm" else f"Guild {scope}"
+                )
                 lines = [f"**Scope:** {scope_title}"]
                 if entry["all"]:
                     lines.append("• ALL commands blocked")
