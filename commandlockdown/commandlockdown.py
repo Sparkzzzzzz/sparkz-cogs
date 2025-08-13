@@ -7,11 +7,9 @@ from typing import List
 class CommandLockdown(commands.Cog):
     """
     CommandLockdown with:
-    - Role/User allow lists (full, cog-level, command-level)
-    - Role/User deny lists (cog-level, command-level)
-    - Deny always overrides allow
+    - Role/User allow lists (full or specific cogs/commands)
+    - Only trust/untrust commands (no deny)
     - Improved status display with multi-line tables
-    - Add/Remove individual cogs/commands without overwriting
     """
 
     def __init__(self, bot: Red):
@@ -24,8 +22,6 @@ class CommandLockdown(commands.Cog):
             lockdown_enabled=False,
             trusted_roles={},
             trusted_users={},
-            denied_roles={},
-            denied_users={},
         )
 
         self._original_checks: List = []
@@ -107,23 +103,15 @@ class CommandLockdown(commands.Cog):
             return True
 
         tr_roles, tr_users = data["trusted_roles"], data["trusted_users"]
-        dr_roles, dr_users = data["denied_roles"], data["denied_users"]
         user_roles = {str(r.id) for r in ctx.author.roles}
 
-        # Deny check first
-        if str(ctx.author.id) in dr_users and await self._is_match(
-            dr_users[str(ctx.author.id)]["cogs"], ctx
-        ):
-            return False
-        for rid, info in dr_roles.items():
-            if rid in user_roles and await self._is_match(info["cogs"], ctx):
-                return False
-
-        # Allow check
+        # Check user
         if str(ctx.author.id) in tr_users:
             info = tr_users[str(ctx.author.id)]
             if info["access"] == "all" or await self._is_match(info["cogs"], ctx):
                 return True
+
+        # Check roles
         allowed_items = set()
         allow_all = False
         for rid, info in tr_roles.items():
@@ -158,6 +146,7 @@ class CommandLockdown(commands.Cog):
         )
         if not obj:
             return await ctx.send("❌ Role or user not found.")
+
         if isinstance(obj, discord.Member):
             tu = await self.config.guild(ctx.guild).trusted_users()
             current = tu.get(str(obj.id), {"access": "cogs", "cogs": []})
@@ -180,6 +169,7 @@ class CommandLockdown(commands.Cog):
                     current["access"] = "cogs"
             tr[str(obj.id)] = current
             await self.config.guild(ctx.guild).trusted_roles.set(tr)
+
         await ctx.send(f"✅ {obj} trusted for: {', '.join(items) if items else 'All'}")
 
     @cl.command()
@@ -191,6 +181,7 @@ class CommandLockdown(commands.Cog):
         )
         if not obj:
             return await ctx.send("❌ Role or user not found.")
+
         if isinstance(obj, discord.Member):
             tu = await self.config.guild(ctx.guild).trusted_users()
             current = tu.get(str(obj.id))
@@ -213,66 +204,14 @@ class CommandLockdown(commands.Cog):
             else:
                 tr[str(obj.id)] = current
             await self.config.guild(ctx.guild).trusted_roles.set(tr)
+
         await ctx.send(f"✅ Removed {', '.join(items)} from {obj} trust list.")
-
-    # ===== DENY / UNDENY =====
-    @cl.command()
-    @checks.is_owner()
-    async def deny(self, ctx, target: str, *items: str):
-        """Deny a role or user for specific cogs/commands."""
-        obj = await self._resolve_role(ctx, target) or await self._resolve_member(
-            ctx, target
-        )
-        if not obj:
-            return await ctx.send("❌ Role or user not found.")
-        if isinstance(obj, discord.Member):
-            du = await self.config.guild(ctx.guild).denied_users()
-            current = set(du.get(str(obj.id), {}).get("cogs", []))
-            current.update(items)
-            du[str(obj.id)] = {"cogs": list(current)}
-            await self.config.guild(ctx.guild).denied_users.set(du)
-        else:
-            dr = await self.config.guild(ctx.guild).denied_roles()
-            current = set(dr.get(str(obj.id), {}).get("cogs", []))
-            current.update(items)
-            dr[str(obj.id)] = {"cogs": list(current)}
-            await self.config.guild(ctx.guild).denied_roles.set(dr)
-        await ctx.send(f"⛔ {obj} denied for: {', '.join(items)}")
-
-    @cl.command()
-    @checks.is_owner()
-    async def undeny(self, ctx, target: str, *items: str):
-        """Remove deny from a role or user for specific cogs/commands."""
-        obj = await self._resolve_role(ctx, target) or await self._resolve_member(
-            ctx, target
-        )
-        if not obj:
-            return await ctx.send("❌ Role or user not found.")
-        if isinstance(obj, discord.Member):
-            du = await self.config.guild(ctx.guild).denied_users()
-            current = set(du.get(str(obj.id), {}).get("cogs", []))
-            current -= set(items)
-            if current:
-                du[str(obj.id)] = {"cogs": list(current)}
-            else:
-                du.pop(str(obj.id), None)
-            await self.config.guild(ctx.guild).denied_users.set(du)
-        else:
-            dr = await self.config.guild(ctx.guild).denied_roles()
-            current = set(dr.get(str(obj.id), {}).get("cogs", []))
-            current -= set(items)
-            if current:
-                dr[str(obj.id)] = {"cogs": list(current)}
-            else:
-                dr.pop(str(obj.id), None)
-            await self.config.guild(ctx.guild).denied_roles.set(dr)
-        await ctx.send(f"✅ Removed {', '.join(items)} from {obj} deny list.")
 
     # ===== STATUS =====
     @cl.command()
     @checks.is_owner()
     async def status(self, ctx):
-        """Show current lockdown status with trusted and denied lists."""
+        """Show current lockdown status with trusted roles and users."""
         data = await self.config.guild(ctx.guild).all()
 
         def format_multiline_table(title, entries, is_user=False):
@@ -294,10 +233,7 @@ class CommandLockdown(commands.Cog):
                     else f"[Unknown {'User' if is_user else 'Role'} {id_}]"
                 )
                 access = info.get("access", "")
-                if access == "all":
-                    items_list = ["All"]
-                else:
-                    items_list = info.get("cogs", [])
+                items_list = ["All"] if access == "all" else info.get("cogs", [])
                 if items_list:
                     first_line = f"{name:<25} {items_list[0]}"
                     lines.append(first_line)
@@ -326,18 +262,6 @@ class CommandLockdown(commands.Cog):
             name="\u200b",
             value=format_multiline_table(
                 "Trusted Users", data["trusted_users"], is_user=True
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="\u200b",
-            value=format_multiline_table("Denied Roles", data["denied_roles"]),
-            inline=False,
-        )
-        embed.add_field(
-            name="\u200b",
-            value=format_multiline_table(
-                "Denied Users", data["denied_users"], is_user=True
             ),
             inline=False,
         )
