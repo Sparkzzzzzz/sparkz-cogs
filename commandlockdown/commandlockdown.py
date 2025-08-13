@@ -6,19 +6,10 @@ from typing import Optional, Dict, Any, List
 
 class CommandLockdown(commands.Cog):
     """
-    CommandLockdown (Nuke mode)
-
-    - Toggles a global lockdown (cl toggle).
-    - cl trust <role> all            -> role gets access to all cogs during lockdown
-    - cl trust <role> CogName Cog2   -> role gets access to listed cogs (case-insensitive match)
-    - cl untrust <role>              -> removes trust (accepts mention, raw id, or exact name)
-    - cl status                      -> nice embed showing lockdown + trusted roles (role names, no pings)
-
-    Nuke behavior:
-    - On load this cog REMOVES all existing global checks (bot-level checks) and replaces them with
-      this cog's global lockdown check. This prevents other cogs' lingering global checks from blocking commands.
-    - On unload this cog removes its global check and RESTORES the original global checks it removed.
-      (If other cogs add new checks while this cog is loaded, those new checks will not be restored by this cog.)
+    CommandLockdown with:
+    - Role/User allow lists (full, cog-level, command-level)
+    - Role/User deny lists (cog-level, command-level)
+    - Deny always overrides allow
     """
 
     def __init__(self, bot: Red):
@@ -29,273 +20,247 @@ class CommandLockdown(commands.Cog):
         )
         self.config.register_guild(
             lockdown_enabled=False,
-            # trusted_roles : mapping str(role_id) -> {"access": "all"|"cogs", "cogs": [cogname,...]}
-            trusted_roles={},
+            trusted_roles={},  # role_id -> {"access": "all"|"cogs", "cogs": [...]}
+            trusted_users={},  # user_id -> {"access": "all"|"cogs", "cogs": [...]}
+            denied_roles={},  # role_id -> {"cogs": [...]}
+            denied_users={},  # user_id -> {"cogs": [...]}
         )
 
-        # Capture and nuke other global checks immediately on load.
-        # Save originals for restoration on unload.
         self._original_checks: List = []
         try:
-            existing = getattr(self.bot, "_checks", None)
-            if existing is None:
-                existing = []
-            else:
-                existing = list(existing)
+            existing = list(getattr(self.bot, "_checks", []))
         except Exception:
             existing = []
 
-        # remove all existing checks and store them
         for chk in existing:
             try:
                 self.bot.remove_check(chk)
                 self._original_checks.append(chk)
             except Exception:
-                # best-effort: ignore failures
                 pass
 
-        # add our global lockdown check
         self.bot.add_check(self._global_lockdown_check)
 
     def cog_unload(self) -> None:
-        """Restore original global checks when the cog unloads and remove our check."""
         try:
-            # remove our check
             self.bot.remove_check(self._global_lockdown_check)
         except Exception:
             pass
-
-        # restore previously removed checks
         for chk in self._original_checks:
             try:
                 self.bot.add_check(chk)
             except Exception:
                 pass
 
-    # -----------------------
-    # Helpers
-    # -----------------------
     async def _resolve_role(
         self, ctx: commands.Context, role_input: str
     ) -> Optional[discord.Role]:
-        """
-        Resolve role_input which can be:
-         - a mention: <@&ID>
-         - an ID string
-         - an exact name (case-insensitive)
-        Returns discord.Role or None.
-        """
-        # mention
         if role_input.startswith("<@&") and role_input.endswith(">"):
             inner = role_input[3:-1]
             if inner.isdigit():
                 return ctx.guild.get_role(int(inner))
-
-        # raw id
         if role_input.isdigit():
             r = ctx.guild.get_role(int(role_input))
             if r:
                 return r
-
-        # exact name (case-insensitive)
         name = role_input.strip()
         for r in ctx.guild.roles:
             if r.name.lower() == name.lower():
                 return r
-
-        # not found
         return None
 
-    def _format_cogs(self, cogs: List[str]) -> List[str]:
-        """Normalize cog names to displayable list (preserve original case as provided)."""
-        return list(cogs)
+    async def _resolve_member(
+        self, ctx: commands.Context, member_input: str
+    ) -> Optional[discord.Member]:
+        if member_input.startswith("<@") and member_input.endswith(">"):
+            inner = member_input.strip("<@!>")
+            if inner.isdigit():
+                return ctx.guild.get_member(int(inner))
+        if member_input.isdigit():
+            return ctx.guild.get_member(int(member_input))
+        name = member_input.strip().lower()
+        for m in ctx.guild.members:
+            if m.name.lower() == name or f"{m.name.lower()}#{m.discriminator}" == name:
+                return m
+        return None
 
-    # -----------------------
-    # Global lockdown check
-    # -----------------------
+    async def _is_match(self, items: List[str], ctx: commands.Context) -> bool:
+        cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
+        cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
+        full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else None
+        items_lower = {i.lower() for i in items}
+        if cog_name and cog_name in items_lower:
+            return True
+        if full_cmd and full_cmd in items_lower:
+            return True
+        return False
+
     async def _global_lockdown_check(self, ctx: commands.Context) -> bool:
-        """
-        Global check that runs for EVERY command.
-        Returns True to allow, raises CheckFailure (or returns False) to block.
-        """
-        # Always allow bot owners (supports multiple owners)
         try:
             if await self.bot.is_owner(ctx.author):
                 return True
         except Exception:
-            # fallback: check owner_ids if available
             if hasattr(self.bot, "owner_ids") and ctx.author.id in getattr(
                 self.bot, "owner_ids", set()
             ):
                 return True
-
-        # Allow DMs and contexts without guild
         if ctx.guild is None:
             return True
 
         data = await self.config.guild(ctx.guild).all()
         if not data.get("lockdown_enabled", False):
-            return True  # lockdown is off
-
-        trusted: Dict[str, Dict[str, Any]] = data.get("trusted_roles", {}) or {}
-        user_role_ids = {str(r.id) for r in ctx.author.roles}
-
-        # Build allowed cogs set from all matching trusted roles the user has
-        allowed_cogs_lower = set()
-        allow_all = False
-        for rid, info in trusted.items():
-            if str(rid) in user_role_ids:
-                access = info.get("access", "all")
-                if access == "all":
-                    allow_all = True
-                    break
-                cogs = info.get("cogs", []) or []
-                for c in cogs:
-                    allowed_cogs_lower.add(c.lower())
-
-        if allow_all:
             return True
 
-        # If command has no cog (maybe a bare command), treat as blocked unless allowed explicitly by 'all'
-        cog_name = None
-        if ctx.cog:
-            # prefer qualified_name, fallback to cog name
-            cog_name = (
-                getattr(ctx.cog, "qualified_name", None) or ctx.cog.__class__.__name__
-            )
-            if cog_name and cog_name.lower() in allowed_cogs_lower:
+        trusted_roles = data.get("trusted_roles", {}) or {}
+        trusted_users = data.get("trusted_users", {}) or {}
+        denied_roles = data.get("denied_roles", {}) or {}
+        denied_users = data.get("denied_users", {}) or {}
+        user_role_ids = {str(r.id) for r in ctx.author.roles}
+
+        # 1. DENY LISTS CHECK (override allow)
+        # User-level deny
+        if str(ctx.author.id) in denied_users:
+            if await self._is_match(
+                denied_users[str(ctx.author.id)].get("cogs", []), ctx
+            ):
+                return False
+        # Role-level deny
+        for rid, info in denied_roles.items():
+            if rid in user_role_ids and await self._is_match(info.get("cogs", []), ctx):
+                return False
+
+        # 2. ALLOW LISTS CHECK
+        # User-level allow
+        if str(ctx.author.id) in trusted_users:
+            info = trusted_users[str(ctx.author.id)]
+            if info.get("access") == "all":
+                return True
+            if await self._is_match(info.get("cogs", []), ctx):
                 return True
 
-        # not allowed
+        # Role-level allow
+        allowed_items = set()
+        allow_all = False
+        for rid, info in trusted_roles.items():
+            if rid in user_role_ids:
+                if info.get("access") == "all":
+                    allow_all = True
+                    break
+                allowed_items.update(info.get("cogs", []))
+        if allow_all:
+            return True
+        if await self._is_match(list(allowed_items), ctx):
+            return True
+
         return False
 
-    # -----------------------
-    # Commands - owner only for management
-    # -----------------------
     @commands.group(name="cl", invoke_without_command=True)
     @checks.is_owner()
     async def cl(self, ctx: commands.Context):
-        """Command Lockdown management (owner-only)."""
         await ctx.send_help()
 
-    @cl.command(name="toggle")
-    @checks.is_owner()
-    async def cl_toggle(self, ctx: commands.Context):
-        """Toggle global lockdown on/off."""
-        guild = ctx.guild
-        current = await self.config.guild(guild).lockdown_enabled()
-        await self.config.guild(guild).lockdown_enabled.set(not current)
-        await ctx.send(
-            embed=discord.Embed(
-                title="Command Lockdown",
-                description=f"🔒 Lockdown is now {'**ON**' if not current else '**OFF**'}",
-                color=discord.Color.red() if not current else discord.Color.green(),
-            )
-        )
+    # ===== ALLOW COMMANDS =====
 
     @cl.command(name="trust")
     @checks.is_owner()
-    async def cl_trust(self, ctx: commands.Context, role_input: str, *cogs: str):
-        """
-        Trust a role.
-        role_input: mention, id, or exact name
-        cogs: either 'all' or list of cog names (space-separated)
-        Examples:
-          cl trust 1374786420241203302 all
-          cl trust "Moderators" Mod Cleanup
-        """
-        guild = ctx.guild
+    async def cl_trust(self, ctx: commands.Context, role_input: str, *items: str):
         role = await self._resolve_role(ctx, role_input)
         if not role:
-            await ctx.send(
-                embed=discord.Embed(
-                    title="Error",
-                    description=f"Role `{role_input}` not found in this server.",
-                    color=discord.Color.red(),
-                )
-            )
-            return
-
-        trusted = await self.config.guild(guild).trusted_roles()
-        if len(cogs) == 0:
-            # default to all
-            trusted[str(role.id)] = {"access": "all", "cogs": []}
-        elif len(cogs) == 1 and cogs[0].lower() == "all":
+            return await ctx.send("❌ Role not found.")
+        trusted = await self.config.guild(ctx.guild).trusted_roles()
+        if len(items) == 0 or (len(items) == 1 and items[0].lower() == "all"):
             trusted[str(role.id)] = {"access": "all", "cogs": []}
         else:
-            # store as provided (case-insensitive matching done at check-time)
-            trusted[str(role.id)] = {"access": "cogs", "cogs": list(cogs)}
-
-        await self.config.guild(guild).trusted_roles.set(trusted)
-
-        cogs_display = (
-            "All"
-            if trusted[str(role.id)]["access"] == "all"
-            else ", ".join(trusted[str(role.id)]["cogs"])
-        )
+            trusted[str(role.id)] = {"access": "cogs", "cogs": list(items)}
+        await self.config.guild(ctx.guild).trusted_roles.set(trusted)
         await ctx.send(
-            embed=discord.Embed(
-                title="Role Trusted",
-                description=f"✅ Role **{role.name}** trusted for: {cogs_display}",
-                color=discord.Color.green(),
-            )
+            f"✅ Role **{role.name}** trusted for: {'All' if trusted[str(role.id)]['access']=='all' else ', '.join(trusted[str(role.id)]['cogs'])}"
         )
 
-    @cl.command(name="untrust")
+    @cl.command(name="allowuser")
     @checks.is_owner()
-    async def cl_untrust(self, ctx: commands.Context, role_input: str):
-        """
-        Untrust a role. Accepts mention, raw id, or exact name.
-        """
-        guild = ctx.guild
-        role = await self._resolve_role(ctx, role_input)
-        role_id = None
-        role_name = None
-        if role:
-            role_id = str(role.id)
-            role_name = role.name
-        elif role_input.isdigit():
-            role_id = role_input
-            role_name = f"Unknown Role ({role_input})"
+    async def cl_allowuser(self, ctx: commands.Context, member_input: str, *items: str):
+        member = await self._resolve_member(ctx, member_input)
+        if not member:
+            return await ctx.send("❌ User not found.")
+        trusted = await self.config.guild(ctx.guild).trusted_users()
+        if len(items) == 0 or (len(items) == 1 and items[0].lower() == "all"):
+            trusted[str(member.id)] = {"access": "all", "cogs": []}
         else:
-            # not resolvable
-            await ctx.send(
-                embed=discord.Embed(
-                    title="Error",
-                    description=f"Role `{role_input}` not found. Use mention, raw ID, or exact role name.",
-                    color=discord.Color.red(),
-                )
-            )
-            return
+            trusted[str(member.id)] = {"access": "cogs", "cogs": list(items)}
+        await self.config.guild(ctx.guild).trusted_users.set(trusted)
+        await ctx.send(
+            f"✅ User **{member}** trusted for: {'All' if trusted[str(member.id)]['access']=='all' else ', '.join(trusted[str(member.id)]['cogs'])}"
+        )
 
-        trusted = await self.config.guild(guild).trusted_roles()
-        if role_id in trusted:
-            del trusted[role_id]
-            await self.config.guild(guild).trusted_roles.set(trusted)
-            await ctx.send(
-                embed=discord.Embed(
-                    title="Role Untrusted",
-                    description=f"✅ Role **{role_name}** has been removed from trusted list.",
-                    color=discord.Color.green(),
-                )
-            )
-        else:
-            await ctx.send(
-                embed=discord.Embed(
-                    title="Not Trusted",
-                    description=f"⚠️ Role **{role_name}** is not in the trusted list.",
-                    color=discord.Color.orange(),
-                )
-            )
+    # ===== DENY COMMANDS =====
+
+    @cl.command(name="denyrole")
+    @checks.is_owner()
+    async def cl_denyrole(self, ctx: commands.Context, role_input: str, *items: str):
+        role = await self._resolve_role(ctx, role_input)
+        if not role:
+            return await ctx.send("❌ Role not found.")
+        denied = await self.config.guild(ctx.guild).denied_roles()
+        current = set(denied.get(str(role.id), {}).get("cogs", []))
+        current.update(items)
+        denied[str(role.id)] = {"cogs": list(current)}
+        await self.config.guild(ctx.guild).denied_roles.set(denied)
+        await ctx.send(f"⛔ Role **{role.name}** denied for: {', '.join(items)}")
+
+    @cl.command(name="denyuser")
+    @checks.is_owner()
+    async def cl_denyuser(self, ctx: commands.Context, member_input: str, *items: str):
+        member = await self._resolve_member(ctx, member_input)
+        if not member:
+            return await ctx.send("❌ User not found.")
+        denied = await self.config.guild(ctx.guild).denied_users()
+        current = set(denied.get(str(member.id), {}).get("cogs", []))
+        current.update(items)
+        denied[str(member.id)] = {"cogs": list(current)}
+        await self.config.guild(ctx.guild).denied_users.set(denied)
+        await ctx.send(f"⛔ User **{member}** denied for: {', '.join(items)}")
+
+    # ===== REMOVE DENY COMMANDS =====
+
+    @cl.command(name="undenyrole")
+    @checks.is_owner()
+    async def cl_undenyrole(self, ctx: commands.Context, role_input: str, *items: str):
+        role = await self._resolve_role(ctx, role_input)
+        if not role:
+            return await ctx.send("❌ Role not found.")
+        denied = await self.config.guild(ctx.guild).denied_roles()
+        if str(role.id) not in denied:
+            return await ctx.send("⚠️ Role has no denies.")
+        current = set(denied[str(role.id)]["cogs"])
+        current.difference_update(items)
+        denied[str(role.id)]["cogs"] = list(current)
+        await self.config.guild(ctx.guild).denied_roles.set(denied)
+        await ctx.send(f"✅ Removed denies from **{role.name}**: {', '.join(items)}")
+
+    @cl.command(name="undenyuser")
+    @checks.is_owner()
+    async def cl_undenyuser(
+        self, ctx: commands.Context, member_input: str, *items: str
+    ):
+        member = await self._resolve_member(ctx, member_input)
+        if not member:
+            return await ctx.send("❌ User not found.")
+        denied = await self.config.guild(ctx.guild).denied_users()
+        if str(member.id) not in denied:
+            return await ctx.send("⚠️ User has no denies.")
+        current = set(denied[str(member.id)]["cogs"])
+        current.difference_update(items)
+        denied[str(member.id)]["cogs"] = list(current)
+        await self.config.guild(ctx.guild).denied_users.set(denied)
+        await ctx.send(f"✅ Removed denies from **{member}**: {', '.join(items)}")
 
     @cl.command(name="status")
     @checks.is_owner()
     async def cl_status(self, ctx: commands.Context):
-        """Show current lockdown status and trusted roles (role names shown)."""
         guild = ctx.guild
         data = await self.config.guild(guild).all()
         lockdown = data.get("lockdown_enabled", False)
-        trusted = data.get("trusted_roles", {}) or {}
 
         embed = discord.Embed(
             title="Command Lockdown Status",
@@ -307,20 +272,62 @@ class CommandLockdown(commands.Cog):
             inline=False,
         )
 
-        if not trusted:
-            embed.add_field(name="Trusted Roles", value="None", inline=False)
-        else:
+        def format_entries(entries, is_user=False):
             lines = []
-            for rid, info in trusted.items():
-                role_obj = guild.get_role(int(rid))
-                role_name = role_obj.name if role_obj else f"[Unknown Role {rid}]"
+            for id_, info in entries.items():
+                obj = (
+                    guild.get_member(int(id_)) if is_user else guild.get_role(int(id_))
+                )
+                name = (
+                    str(obj)
+                    if obj
+                    else f"[Unknown {'User' if is_user else 'Role'} {id_}]"
+                )
                 if info.get("access") == "all":
-                    lines.append(f"**{role_name}** → All")
+                    lines.append(f"**{name}** → All")
                 else:
                     lines.append(
-                        f"**{role_name}** → {', '.join(info.get('cogs', [])) or 'None'}"
+                        f"**{name}** → {', '.join(info.get('cogs', [])) or 'None'}"
                     )
-            embed.add_field(name="Trusted Roles", value="\n".join(lines), inline=False)
+            return lines or ["None"]
+
+        embed.add_field(
+            name="Trusted Roles",
+            value="\n".join(format_entries(data["trusted_roles"], False)),
+            inline=False,
+        )
+        embed.add_field(
+            name="Trusted Users",
+            value="\n".join(format_entries(data["trusted_users"], True)),
+            inline=False,
+        )
+
+        def format_denies(entries, is_user=False):
+            lines = []
+            for id_, info in entries.items():
+                obj = (
+                    guild.get_member(int(id_)) if is_user else guild.get_role(int(id_))
+                )
+                name = (
+                    str(obj)
+                    if obj
+                    else f"[Unknown {'User' if is_user else 'Role'} {id_}]"
+                )
+                lines.append(
+                    f"**{name}** → {', '.join(info.get('cogs', [])) or 'None'}"
+                )
+            return lines or ["None"]
+
+        embed.add_field(
+            name="Denied Roles",
+            value="\n".join(format_denies(data["denied_roles"], False)),
+            inline=False,
+        )
+        embed.add_field(
+            name="Denied Users",
+            value="\n".join(format_denies(data["denied_users"], True)),
+            inline=False,
+        )
 
         await ctx.send(embed=embed)
 
