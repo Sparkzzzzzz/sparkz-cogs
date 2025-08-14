@@ -119,21 +119,24 @@ class OwnerBlacklist(commands.Cog):
 
         if target.lower() == "all":
             entry["all"] = True
+            target_display = "all commands"
         elif "." in target:
             commands_set = set(entry.get("commands", []))
             commands_set.add(target.lower())
             entry["commands"] = list(commands_set)
+            target_display = target
         else:
             cogs_set = set(entry.get("cogs", []))
             cogs_set.add(target.lower())
             entry["cogs"] = list(cogs_set)
+            target_display = target
 
         bl_data[uid][scope_key] = entry
         await self.config.blacklist.set(bl_data)
 
         embed = discord.Embed(
             title="✅ Successfully Owner Blacklisted",
-            description=f"{user.mention} from using `{target}` {self._format_scope_name(ctx, scope_key)}.",
+            description=f"{user.mention} from using `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
@@ -176,14 +179,17 @@ class OwnerBlacklist(commands.Cog):
         entry = bl_data[uid][scope_key]
         if target.lower() == "all":
             entry["all"] = False
+            target_display = "all commands"
         elif "." in target:
             commands_set = set(entry.get("commands", []))
             commands_set.discard(target.lower())
             entry["commands"] = list(commands_set)
+            target_display = target
         else:
             cogs_set = set(entry.get("cogs", []))
             cogs_set.discard(target.lower())
             entry["cogs"] = list(cogs_set)
+            target_display = target
 
         if not entry["all"] and not entry["cogs"] and not entry["commands"]:
             bl_data[uid].pop(scope_key)
@@ -195,7 +201,7 @@ class OwnerBlacklist(commands.Cog):
 
         embed = discord.Embed(
             title="✅ Successfully Removed from Owner Blacklist",
-            description=f"{user.mention} — removed `{target}` {self._format_scope_name(ctx, scope_key)}.",
+            description=f"{user.mention} — removed `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
             color=discord.Color.green(),
         )
         await ctx.send(embed=embed)
