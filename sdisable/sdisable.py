@@ -27,7 +27,9 @@ class SDisable(commands.Cog):
     def _disable_commands(self):
         """Remove the target commands from the bot."""
         for name in list(self.globally_disabled):
-            cmd = self.bot.all_commands.get(name)
+            if name in self._stored_commands:
+                continue  # Already removed
+            cmd = self.bot.get_command(name)  # use get_command instead of all_commands
             if cmd:
                 self._stored_commands[name] = cmd
                 self.bot.remove_command(name)
@@ -35,12 +37,12 @@ class SDisable(commands.Cog):
     def _restore_commands(self):
         """Re-add previously removed commands."""
         for name, cmd in self._stored_commands.items():
-            self.bot.add_command(cmd)
+            self.bot.add_command(cmd, override=True)  # ensure it properly restores
         self._stored_commands.clear()
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # Make sure they're gone even if bot reloads
+        # Make sure they're gone even if bot reconnects
         self._disable_commands()
 
 
