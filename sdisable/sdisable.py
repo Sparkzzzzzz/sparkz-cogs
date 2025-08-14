@@ -8,7 +8,7 @@ class SDisable(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        # Hardcoded list of commands to disable globally
+        # Exact command names to block (lowercase)
         self.globally_disabled = {
             "about",
             "licenseinfo",
@@ -20,19 +20,18 @@ class SDisable(commands.Cog):
             "changelog",
             "licenses",
         }
-        bot.add_check(self._disable_check)
+        self._old_invoke = bot.invoke
+        bot.invoke = self._intercept_invoke
 
-    def cog_unload(self):
-        try:
-            self.bot.remove_check(self._disable_check)
-        except Exception:
-            pass
+    async def cog_unload(self):
+        # Restore original invoke method
+        self.bot.invoke = self._old_invoke
 
-    async def _disable_check(self, ctx: commands.Context) -> bool:
-        """Block commands if they are in the disabled list."""
+    async def _intercept_invoke(self, ctx: commands.Context):
+        """Intercept and cancel globally disabled commands before they run."""
         if ctx.command and ctx.command.qualified_name.lower() in self.globally_disabled:
-            return False  # silent fail
-        return True
+            return  # silently do nothing
+        await self._old_invoke(ctx)
 
 
 async def setup(bot: Red):
