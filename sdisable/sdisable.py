@@ -20,7 +20,6 @@ class SDisable(commands.Cog):
             "changelog",
             "licenses",
         }
-        # Add a global check
         bot.add_check(self._disable_check)
 
     def cog_unload(self):
@@ -32,11 +31,7 @@ class SDisable(commands.Cog):
     async def _disable_check(self, ctx: commands.Context) -> bool:
         """Block commands if they are in the disabled list."""
         if ctx.command and ctx.command.qualified_name.lower() in self.globally_disabled:
-            # Silent fail
-            return False
-            # Uncomment below to send a message instead:
-            # await ctx.send("❌ This command is disabled by the developer.")
-            # return False
+            return False  # silent fail
         return True
 
 
