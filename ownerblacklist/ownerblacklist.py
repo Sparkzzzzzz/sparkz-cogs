@@ -67,7 +67,7 @@ class OwnerBlacklist(commands.Cog):
         if scope_key == "all":
             return "everywhere"
         elif scope_key == "dm":
-            return "in DMs"
+            return "in bot DMs"
         elif ctx.guild and scope_key == str(ctx.guild.id):
             return "in this server"
         else:
@@ -137,8 +137,8 @@ class OwnerBlacklist(commands.Cog):
 
         target_display = self._format_target_display(target)
         embed = discord.Embed(
-            title="✅ Successfully Owner Blacklisted",
-            description=f"{user.mention} from using `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
+            title="✅ Blacklist Updated",
+            description=f"{user.mention} — denied from using `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
@@ -200,8 +200,8 @@ class OwnerBlacklist(commands.Cog):
 
         target_display = self._format_target_display(target)
         embed = discord.Embed(
-            title="✅ Successfully Removed from Owner Blacklist",
-            description=f"{user.mention} — removed `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
+            title="✅ Blacklist Updated",
+            description=f"{user.mention} — allowed to use `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
             color=discord.Color.green(),
         )
         await ctx.send(embed=embed)
