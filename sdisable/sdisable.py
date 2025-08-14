@@ -4,7 +4,7 @@ from redbot.core.bot import Red
 
 
 class SDisable(commands.Cog):
-    """Globally disable specific commands for everyone, including the owner."""
+    """Completely remove specific commands from Red for everyone, including owner."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -18,31 +18,39 @@ class SDisable(commands.Cog):
             "licenses",
         }
 
-        # Wrap invoke to hard-block execution
-        self._old_invoke = bot.invoke
-        bot.invoke = self._intercept_invoke
+        # Remove them right away if loaded after Core
+        self._remove_disabled_commands()
 
-        # Wrap get_command so help lookups can't find disabled commands
-        self._old_get_command = bot.get_command
-        bot.get_command = self._intercept_get_command
+        # Listen for future command registrations (if Core reloads, etc.)
+        bot.add_listener(self._on_command_add, "on_command_add")
 
-    async def cog_unload(self):
-        # Restore original methods
-        self.bot.invoke = self._old_invoke
-        self.bot.get_command = self._old_get_command
+    def cog_unload(self):
+        self.bot.remove_listener(self._on_command_add, "on_command_add")
 
-    async def _intercept_invoke(self, ctx: commands.Context):
-        """Intercept and cancel globally disabled commands before they run."""
+    def _remove_disabled_commands(self):
+        """Permanently remove blocked commands from the bot's registry."""
+        to_remove = [
+            name for name in self.globally_disabled if name in self.bot.all_commands
+        ]
+        for name in to_remove:
+            cmd = self.bot.all_commands.pop(name, None)
+            if cmd:
+                for alias in list(cmd.aliases):
+                    self.bot.all_commands.pop(alias, None)
+
+    async def _on_command_add(self, command: commands.Command):
+        """Whenever a new command is added, remove it if it's disabled."""
+        if command.qualified_name.lower() in self.globally_disabled:
+            # Remove from bot immediately
+            self.bot.all_commands.pop(command.qualified_name, None)
+            for alias in list(command.aliases):
+                self.bot.all_commands.pop(alias, None)
+
+    async def _disable_check(self, ctx: commands.Context) -> bool:
+        """Extra safety check to prevent execution (shouldn't be needed if removed)."""
         if ctx.command and ctx.command.qualified_name.lower() in self.globally_disabled:
-            return  # silently block
-        await self._old_invoke(ctx)
-
-    def _intercept_get_command(self, name: str):
-        """Intercept command lookup so help can't even find disabled commands."""
-        cmd = self._old_get_command(name)
-        if cmd and cmd.qualified_name.lower() in self.globally_disabled:
-            return None
-        return cmd
+            return False
+        return True
 
 
 async def setup(bot: Red):
