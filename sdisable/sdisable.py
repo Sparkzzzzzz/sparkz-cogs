@@ -22,14 +22,14 @@ class SDisable(commands.Cog):
         self._old_invoke = bot.invoke
         bot.invoke = self._intercept_invoke
 
-        # Wrap send_help_for to hide in help
-        self._old_send_help = bot.send_help_for
-        bot.send_help_for = self._intercept_help
+        # Wrap get_command so help lookups can't find disabled commands
+        self._old_get_command = bot.get_command
+        bot.get_command = self._intercept_get_command
 
     async def cog_unload(self):
         # Restore original methods
         self.bot.invoke = self._old_invoke
-        self.bot.send_help_for = self._old_send_help
+        self.bot.get_command = self._old_get_command
 
     async def _intercept_invoke(self, ctx: commands.Context):
         """Intercept and cancel globally disabled commands before they run."""
@@ -37,23 +37,12 @@ class SDisable(commands.Cog):
             return  # silently block
         await self._old_invoke(ctx)
 
-    async def _intercept_help(self, *args, **kwargs):
-        """Intercept help command output to hide disabled commands."""
-        if len(args) > 1:
-            target = args[1]
-            if isinstance(target, commands.Command):
-                if target.qualified_name.lower() in self.globally_disabled:
-                    return  # hide entirely
-            elif isinstance(target, commands.Cog):
-                # Keep original get_commands to restore later if needed
-                if not hasattr(target, "__original_get_commands__"):
-                    target.__original_get_commands__ = target.get_commands
-                target.get_commands = lambda *a, **k: [
-                    cmd
-                    for cmd in target.__original_get_commands__(*a, **k)
-                    if cmd.qualified_name.lower() not in self.globally_disabled
-                ]
-        return await self._old_send_help(*args, **kwargs)
+    def _intercept_get_command(self, name: str):
+        """Intercept command lookup so help can't even find disabled commands."""
+        cmd = self._old_get_command(name)
+        if cmd and cmd.qualified_name.lower() in self.globally_disabled:
+            return None
+        return cmd
 
 
 async def setup(bot: Red):
