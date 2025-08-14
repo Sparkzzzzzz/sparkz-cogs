@@ -68,11 +68,15 @@ class OwnerBlacklist(commands.Cog):
             return "everywhere"
         elif scope_key == "dm":
             return "in DMs"
-        elif scope_key == str(ctx.guild.id):
+        elif ctx.guild and scope_key == str(ctx.guild.id):
             return "in this server"
         else:
             guild = self.bot.get_guild(int(scope_key))
             return f"in server '{guild.name}'" if guild else f"in server ID {scope_key}"
+
+    def _format_target_display(self, target: str) -> str:
+        """Return human-readable target name."""
+        return "all commands" if target.lower() == "all" else target
 
     @commands.group(name="ownerblacklist", aliases=["ob"])
     @checks.is_owner()
@@ -119,21 +123,19 @@ class OwnerBlacklist(commands.Cog):
 
         if target.lower() == "all":
             entry["all"] = True
-            target_display = "all commands"
         elif "." in target:
             commands_set = set(entry.get("commands", []))
             commands_set.add(target.lower())
             entry["commands"] = list(commands_set)
-            target_display = target
         else:
             cogs_set = set(entry.get("cogs", []))
             cogs_set.add(target.lower())
             entry["cogs"] = list(cogs_set)
-            target_display = target
 
         bl_data[uid][scope_key] = entry
         await self.config.blacklist.set(bl_data)
 
+        target_display = self._format_target_display(target)
         embed = discord.Embed(
             title="✅ Successfully Owner Blacklisted",
             description=f"{user.mention} from using `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
@@ -179,17 +181,14 @@ class OwnerBlacklist(commands.Cog):
         entry = bl_data[uid][scope_key]
         if target.lower() == "all":
             entry["all"] = False
-            target_display = "all commands"
         elif "." in target:
             commands_set = set(entry.get("commands", []))
             commands_set.discard(target.lower())
             entry["commands"] = list(commands_set)
-            target_display = target
         else:
             cogs_set = set(entry.get("cogs", []))
             cogs_set.discard(target.lower())
             entry["cogs"] = list(cogs_set)
-            target_display = target
 
         if not entry["all"] and not entry["cogs"] and not entry["commands"]:
             bl_data[uid].pop(scope_key)
@@ -199,6 +198,7 @@ class OwnerBlacklist(commands.Cog):
 
         await self.config.blacklist.set(bl_data)
 
+        target_display = self._format_target_display(target)
         embed = discord.Embed(
             title="✅ Successfully Removed from Owner Blacklist",
             description=f"{user.mention} — removed `{target_display}` {self._format_scope_name(ctx, scope_key)}.",
