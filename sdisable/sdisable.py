@@ -17,22 +17,31 @@ class SDisable(commands.Cog):
             "changelog",
             "licenses",
         }
-        # Store reference to the check so we can remove it
-        self._check_ref = self._disable_check
-        self.bot.add_check(self._check_ref)
+        # Store removed commands so we can restore on unload
+        self._stored_commands = {}
+        self._disable_commands()
 
     def cog_unload(self):
-        # Always remove the exact same check reference
-        try:
-            self.bot.remove_check(self._check_ref)
-        except Exception:
-            pass
+        self._restore_commands()
 
-    async def _disable_check(self, ctx: commands.Context) -> bool:
-        """Block commands if they are in the disabled list."""
-        if ctx.command and ctx.command.qualified_name.lower() in self.globally_disabled:
-            return False
-        return True
+    def _disable_commands(self):
+        """Remove the target commands from the bot."""
+        for name in list(self.globally_disabled):
+            cmd = self.bot.all_commands.get(name)
+            if cmd:
+                self._stored_commands[name] = cmd
+                self.bot.remove_command(name)
+
+    def _restore_commands(self):
+        """Re-add previously removed commands."""
+        for name, cmd in self._stored_commands.items():
+            self.bot.add_command(cmd)
+        self._stored_commands.clear()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # Make sure they're gone even if bot reloads
+        self._disable_commands()
 
 
 async def setup(bot: Red):
