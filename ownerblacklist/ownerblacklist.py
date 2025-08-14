@@ -62,6 +62,18 @@ class OwnerBlacklist(commands.Cog):
 
         return True
 
+    def _format_scope_name(self, ctx, scope_key: str) -> str:
+        """Return human-readable scope name."""
+        if scope_key == "all":
+            return "everywhere"
+        elif scope_key == "dm":
+            return "in DMs"
+        elif scope_key == str(ctx.guild.id):
+            return "in this server"
+        else:
+            guild = self.bot.get_guild(int(scope_key))
+            return f"in server '{guild.name}'" if guild else f"in server ID {scope_key}"
+
     @commands.group(name="ownerblacklist", aliases=["ob"])
     @checks.is_owner()
     async def ob_group(self, ctx):
@@ -118,7 +130,13 @@ class OwnerBlacklist(commands.Cog):
 
         bl_data[uid][scope_key] = entry
         await self.config.blacklist.set(bl_data)
-        await ctx.send(f"✅ Owner Blacklisted {user} from `{target}` in `{scope_key}`.")
+
+        embed = discord.Embed(
+            title="✅ Successfully Owner Blacklisted",
+            description=f"{user.mention} from using `{target}` {self._format_scope_name(ctx, scope_key)}.",
+            color=discord.Color.red(),
+        )
+        await ctx.send(embed=embed)
 
     @ob_group.command(name="remove")
     @checks.is_owner()
@@ -174,9 +192,13 @@ class OwnerBlacklist(commands.Cog):
             bl_data.pop(uid)
 
         await self.config.blacklist.set(bl_data)
-        await ctx.send(
-            f"✅ Removed `{target}` from {user}'s Owner Blacklist in `{scope_key}`."
+
+        embed = discord.Embed(
+            title="✅ Successfully Removed from Owner Blacklist",
+            description=f"{user.mention} — removed `{target}` {self._format_scope_name(ctx, scope_key)}.",
+            color=discord.Color.green(),
         )
+        await ctx.send(embed=embed)
 
     @ob_group.command(name="list")
     @checks.is_owner()
