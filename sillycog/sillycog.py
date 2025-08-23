@@ -13,7 +13,7 @@ STATUS_EMOJIS = {
     "stopped": "🔴",
     "restarting": "🟡",
     "unknown": "⚪",
-    None: "⚪"
+    None: "⚪",
 }
 
 
@@ -65,16 +65,18 @@ class SillyCog(commands.Cog):
                 name = attr.get("name", "Unknown")
                 node = attr.get("node", "Unknown")
                 renewal = attr.get("renewal", "N/A")
-                maintenance = "Scheduled" if attr.get("is_node_under_maintenance", False) else "None"
+                maintenance = (
+                    "Scheduled"
+                    if attr.get("is_node_under_maintenance", False)
+                    else "None"
+                )
                 status_raw = attr.get("status", None)
                 status_icon = STATUS_EMOJIS.get((status_raw or "unknown").lower(), "⚪")
                 status_text = status_raw.capitalize() if status_raw else "Unknown"
 
-                embed = discord.Embed(
-                    title=name,
-                    color=discord.Color.blue()
-                )
+                embed = discord.Embed(title=name, color=discord.Color.blue())
                 embed.description = (
+                    f"- 🌐 Node: `{node}`\n"
                     f"- {status_icon} Status: {status_text}\n"
                     f"- 📅 Renewal: {renewal} days\n"
                     f"- 🔧 Node Maintenance: {maintenance}"
@@ -98,15 +100,17 @@ class ServerPages(ui.View):
         self.current = 0
 
     async def update_message(self, interaction: discord.Interaction):
-        embed = self.pages[self.current]
-        await interaction.response.edit_message(embed=embed, view=self)
+        """Update the message embed for the current page."""
+        await interaction.response.edit_message(
+            embed=self.pages[self.current], view=self
+        )
 
     @ui.button(emoji="⬅️", style=discord.ButtonStyle.gray)
     async def previous(self, button: ui.Button, interaction: discord.Interaction):
         self.current = (self.current - 1) % len(self.pages)
         await self.update_message(interaction)
 
-    @ui.button(emoji="❌", style=discord.ButtonStyle.red)
+    @ui.button(emoji="❌", style=discord.ButtonStyle.gray)
     async def close(self, button: ui.Button, interaction: discord.Interaction):
         await interaction.message.delete()
         self.stop()
