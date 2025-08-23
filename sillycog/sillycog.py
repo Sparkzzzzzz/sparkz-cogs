@@ -24,7 +24,7 @@ class SillyCog(commands.Cog):
     @commands.is_owner()
     @commands.command(name="sillystats")
     async def silly_stats(self, ctx: Context):
-        """Show your SillyDev servers and their renewal days."""
+        """Show your SillyDev servers, renewal days, maintenance, and status."""
         api_key: Optional[str] = await self.config.api_key()
 
         if not api_key:
@@ -51,12 +51,22 @@ class SillyCog(commands.Cog):
                     name = attr.get("name", "Unknown")
                     node = attr.get("node", "Unknown")
                     renewal = attr.get("renewal", "N/A")
+
+                    # maintenance + status
+                    maintenance = (
+                        "🛠️ Yes"
+                        if attr.get("is_node_under_maintenance", False)
+                        else "✅ No"
+                    )
+                    status = attr.get("status", None) or "Unknown"
+
                     servers_list.append(
-                        f"• **{name}** — renewable in `{renewal}` days (Node: {node})"
+                        f"• **{name}** — renewal in `{renewal}` days\n"
+                        f"   🌐 Node: `{node}` | 🛠️ Maintenance: {maintenance} | 📊 Status: `{status}`"
                     )
 
                 servers_text = (
-                    "\n".join(servers_list) if servers_list else "No servers found."
+                    "\n\n".join(servers_list) if servers_list else "No servers found."
                 )
 
                 embed = discord.Embed(
