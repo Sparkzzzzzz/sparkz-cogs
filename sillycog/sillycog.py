@@ -62,16 +62,14 @@ class SillyCog(commands.Cog):
             pages: List[discord.Embed] = []
             for server in servers:
                 attr = server.get("attributes", {})
-                name = attr.get("name", "Unknown")
-                node = attr.get("node", "Unknown")
-                renewal = attr.get("renewal", "N/A")
+                name = attr.get("name") or "Unknown"
+                node = attr.get("node") or "Unknown"
+                renewal = str(attr.get("renewal") or "N/A")
                 maintenance = (
-                    "Scheduled"
-                    if attr.get("is_node_under_maintenance", False)
-                    else "None"
+                    "Scheduled" if attr.get("is_node_under_maintenance") else "None"
                 )
-                status_raw = attr.get("status", None)
-                status_icon = STATUS_EMOJIS.get((status_raw or "unknown").lower(), "⚪")
+                status_raw = attr.get("status") or "unknown"
+                status_icon = STATUS_EMOJIS.get(status_raw.lower(), "⚪")
                 status_text = status_raw.capitalize() if status_raw else "Unknown"
 
                 embed = discord.Embed(title=name, color=discord.Color.blue())
@@ -101,7 +99,6 @@ class ServerPages(ui.View):
 
     async def update_message(self, interaction: discord.Interaction):
         """Update the message embed for the current page."""
-        # Properly edit message to avoid 'interaction failed'
         await interaction.response.edit_message(
             embed=self.pages[self.current], view=self
         )
