@@ -101,6 +101,7 @@ class ServerPages(ui.View):
 
     async def update_message(self, interaction: discord.Interaction):
         """Update the message embed for the current page."""
+        # Properly edit message to avoid 'interaction failed'
         await interaction.response.edit_message(
             embed=self.pages[self.current], view=self
         )
