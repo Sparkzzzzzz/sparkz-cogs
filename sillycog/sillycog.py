@@ -1,6 +1,5 @@
 import aiohttp
 import discord
-from discord import ui
 from redbot.core import commands, Config
 from redbot.core.bot import Red
 from redbot.core.commands import Context
@@ -35,7 +34,7 @@ class SillyCog(commands.Cog):
     @commands.is_owner()
     @commands.command(name="sillystats")
     async def silly_stats(self, ctx: Context):
-        """Show your SillyDev servers with renewal, maintenance, and status in a paginated embed."""
+        """Show your SillyDev servers with renewal, maintenance, and status using reactions for pagination."""
         api_key: Optional[str] = await self.config.api_key()
 
         if not api_key:
@@ -81,37 +80,49 @@ class SillyCog(commands.Cog):
                 )
                 pages.append(embed)
 
-            # Send first page with buttons
-            view = ServerPages(pages)
-            await ctx.send(embed=pages[0], view=view)
+            current = 0
+            message = await ctx.send(embed=pages[current])
+
+            if len(pages) == 1:
+                return  # No need for reactions if only one server
+
+            # Add navigation reactions
+            await message.add_reaction("⬅️")
+            await message.add_reaction("❌")
+            await message.add_reaction("➡️")
+
+            def check(reaction, user):
+                return (
+                    user == ctx.author
+                    and str(reaction.emoji) in ["⬅️", "➡️", "❌"]
+                    and reaction.message.id == message.id
+                )
+
+            while True:
+                try:
+                    reaction, user = await ctx.bot.wait_for(
+                        "reaction_add", timeout=180.0, check=check
+                    )
+                except TimeoutError:
+                    # Remove all reactions when timeout
+                    await message.clear_reactions()
+                    break
+
+                if str(reaction.emoji) == "❌":
+                    await message.delete()
+                    break
+                elif str(reaction.emoji) == "⬅️":
+                    current = (current - 1) % len(pages)
+                    await message.edit(embed=pages[current])
+                elif str(reaction.emoji) == "➡️":
+                    current = (current + 1) % len(pages)
+                    await message.edit(embed=pages[current])
+
+                # Remove user's reaction to keep interface clean
+                try:
+                    await message.remove_reaction(reaction, user)
+                except discord.Forbidden:
+                    pass  # Bot may not have permission
 
         except Exception as e:
             await ctx.send(f"❌ An error occurred:\n```{str(e)}```")
-
-
-class ServerPages(ui.View):
-    """Paginated embed view for servers with working buttons."""
-
-    def __init__(self, pages: List[discord.Embed]):
-        super().__init__(timeout=180)
-        self.pages = pages
-        self.current = 0
-
-    @ui.button(emoji="⬅️", style=discord.ButtonStyle.gray)
-    async def previous(self, button: ui.Button, interaction: discord.Interaction):
-        self.current = (self.current - 1) % len(self.pages)
-        await interaction.response.edit_message(
-            embed=self.pages[self.current], view=self
-        )
-
-    @ui.button(emoji="❌", style=discord.ButtonStyle.gray)
-    async def close(self, button: ui.Button, interaction: discord.Interaction):
-        await interaction.message.delete()
-        self.stop()
-
-    @ui.button(emoji="➡️", style=discord.ButtonStyle.gray)
-    async def next(self, button: ui.Button, interaction: discord.Interaction):
-        self.current = (self.current + 1) % len(self.pages)
-        await interaction.response.edit_message(
-            embed=self.pages[self.current], view=self
-        )
