@@ -7,7 +7,7 @@ from typing import Optional
 
 
 class SillyCog(commands.Cog):
-    """Get your SillyDev uptime info."""
+    """Get your SillyDev server renewal info."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -24,7 +24,7 @@ class SillyCog(commands.Cog):
     @commands.is_owner()
     @commands.command(name="sillystats")
     async def silly_stats(self, ctx: Context):
-        """Show your SillyDev uptime days left."""
+        """Show your SillyDev servers and their renewal days."""
         api_key: Optional[str] = await self.config.api_key()
 
         if not api_key:
@@ -32,8 +32,7 @@ class SillyCog(commands.Cog):
             return
 
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
-
-        url = "https://panel.sillydev.co.uk/api/client/store"
+        url = "https://panel.sillydev.co.uk/api/client"
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -43,26 +42,30 @@ class SillyCog(commands.Cog):
                             f"❌ API request failed with status {resp.status}."
                         )
 
-                    data = await resp.json()
+                    servers_data = await resp.json()
 
-                    # Extract uptime days left
-                    uptime_days = (
-                        data.get("attributes", {})
-                        .get("uptime", {})
-                        .get("days_left", None)
+                # Build servers field
+                servers_list = []
+                for server in servers_data.get("data", []):
+                    attr = server.get("attributes", {})
+                    name = attr.get("name", "Unknown")
+                    node = attr.get("node", "Unknown")
+                    renewal = attr.get("renewal", "N/A")
+                    servers_list.append(
+                        f"• **{name}** — renewable in `{renewal}` days (Node: {node})"
                     )
 
-                    if uptime_days is None:
-                        return await ctx.send(
-                            "❌ Could not find `uptime.days_left` in API response."
-                        )
+                servers_text = (
+                    "\n".join(servers_list) if servers_list else "No servers found."
+                )
 
-                    embed = discord.Embed(
-                        title="⏳ SillyDev Uptime",
-                        description=f"**Days Left:** `{uptime_days}`",
-                        color=discord.Color.blue(),
-                    )
-                    await ctx.send(embed=embed)
+                embed = discord.Embed(
+                    title="🖥️ SillyDev Servers",
+                    description=servers_text,
+                    color=discord.Color.blue(),
+                )
+
+                await ctx.send(embed=embed)
 
         except Exception as e:
             await ctx.send(f"❌ An error occurred:\n```{str(e)}```")
