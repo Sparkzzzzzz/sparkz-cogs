@@ -7,7 +7,7 @@ from typing import Optional
 
 
 class SillyCog(commands.Cog):
-    """Get your SillyDev credit info."""
+    """Get your SillyDev uptime info."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -24,7 +24,7 @@ class SillyCog(commands.Cog):
     @commands.is_owner()
     @commands.command(name="sillystats")
     async def silly_stats(self, ctx: Context):
-        """Show your SillyDev credit balance."""
+        """Show your SillyDev uptime days left."""
         api_key: Optional[str] = await self.config.api_key()
 
         if not api_key:
@@ -45,17 +45,22 @@ class SillyCog(commands.Cog):
 
                     data = await resp.json()
 
-                    credits = data.get("attributes", {}).get("credits", None)
+                    # Extract uptime days left
+                    uptime_days = (
+                        data.get("attributes", {})
+                        .get("uptime", {})
+                        .get("days_left", None)
+                    )
 
-                    if credits is None:
+                    if uptime_days is None:
                         return await ctx.send(
-                            "❌ Could not find `credits` in API response."
+                            "❌ Could not find `uptime.days_left` in API response."
                         )
 
                     embed = discord.Embed(
-                        title="💳 SillyDev Stats",
-                        description=f"**Credits Remaining:** `{credits}`",
-                        color=discord.Color.gold(),
+                        title="⏳ SillyDev Uptime",
+                        description=f"**Days Left:** `{uptime_days}`",
+                        color=discord.Color.blue(),
                     )
                     await ctx.send(embed=embed)
 
