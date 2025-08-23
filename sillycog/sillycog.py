@@ -58,7 +58,7 @@ class SillyCog(commands.Cog):
             if not servers:
                 return await ctx.send("❌ No servers found.")
 
-            # Prepare pages
+            # Prepare embeds for each server
             pages: List[discord.Embed] = []
             for server in servers:
                 attr = server.get("attributes", {})
@@ -90,23 +90,19 @@ class SillyCog(commands.Cog):
 
 
 class ServerPages(ui.View):
-    """Discord UI View for paginated server embeds."""
+    """Paginated embed view for servers with working buttons."""
 
     def __init__(self, pages: List[discord.Embed]):
         super().__init__(timeout=180)
         self.pages = pages
         self.current = 0
 
-    async def update_message(self, interaction: discord.Interaction):
-        """Update the message embed for the current page."""
-        await interaction.response.edit_message(
-            embed=self.pages[self.current], view=self
-        )
-
     @ui.button(emoji="⬅️", style=discord.ButtonStyle.gray)
     async def previous(self, button: ui.Button, interaction: discord.Interaction):
         self.current = (self.current - 1) % len(self.pages)
-        await self.update_message(interaction)
+        await interaction.response.edit_message(
+            embed=self.pages[self.current], view=self
+        )
 
     @ui.button(emoji="❌", style=discord.ButtonStyle.gray)
     async def close(self, button: ui.Button, interaction: discord.Interaction):
@@ -116,4 +112,6 @@ class ServerPages(ui.View):
     @ui.button(emoji="➡️", style=discord.ButtonStyle.gray)
     async def next(self, button: ui.Button, interaction: discord.Interaction):
         self.current = (self.current + 1) % len(self.pages)
-        await self.update_message(interaction)
+        await interaction.response.edit_message(
+            embed=self.pages[self.current], view=self
+        )
