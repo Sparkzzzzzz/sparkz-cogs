@@ -59,7 +59,7 @@ class SillyCog(commands.Cog):
 
             # Prepare embeds for each server
             pages: List[discord.Embed] = []
-            for server in servers:
+            for idx, server in enumerate(servers, start=1):
                 attr = server.get("attributes", {})
                 name = attr.get("name") or "Unknown"
                 node = attr.get("node") or "Unknown"
@@ -76,7 +76,8 @@ class SillyCog(commands.Cog):
                     f"- 🌐 Node: `{node}`\n"
                     f"- {status_icon} Status: {status_text}\n"
                     f"- 📅 Renewal: {renewal} days\n"
-                    f"- 🔧 Node Maintenance: {maintenance}"
+                    f"- 🔧 Node Maintenance: {maintenance}\n\n"
+                    f"Page {idx}/{len(servers)}"
                 )
                 pages.append(embed)
 
@@ -84,7 +85,7 @@ class SillyCog(commands.Cog):
             message = await ctx.send(embed=pages[current])
 
             if len(pages) == 1:
-                return  # No need for reactions if only one server
+                return  # Only one server, no reactions needed
 
             # Add navigation reactions
             await message.add_reaction("⬅️")
@@ -101,11 +102,14 @@ class SillyCog(commands.Cog):
             while True:
                 try:
                     reaction, user = await ctx.bot.wait_for(
-                        "reaction_add", timeout=180.0, check=check
+                        "reaction_add", timeout=15.0, check=check
                     )
                 except TimeoutError:
-                    # Remove all reactions when timeout
-                    await message.clear_reactions()
+                    # Remove all reactions after 15 secs of inactivity
+                    try:
+                        await message.clear_reactions()
+                    except discord.Forbidden:
+                        pass
                     break
 
                 if str(reaction.emoji) == "❌":
@@ -118,7 +122,7 @@ class SillyCog(commands.Cog):
                     current = (current + 1) % len(pages)
                     await message.edit(embed=pages[current])
 
-                # Remove user's reaction to keep interface clean
+                # Remove user's reaction for cleaner interface
                 try:
                     await message.remove_reaction(reaction, user)
                 except discord.Forbidden:
