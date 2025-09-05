@@ -206,56 +206,57 @@ class OwnerBlacklist(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @ob_group.command(name="list")
-    @checks.is_owner()
-    async def ob_list(self, ctx, user: Optional[discord.User] = None):
-        """List Owner Blacklist entries."""
-        bl_data = await self.config.blacklist()
-        if not bl_data:
-            await ctx.send("✅ No Owner Blacklists set.")
-            return
+    ## OB LIST
+    # @ob_group.command(name="list")
+    # @checks.is_owner()
+    # async def ob_list(self, ctx, user: Optional[discord.User] = None):
+    #     """List Owner Blacklist entries."""
+    #     bl_data = await self.config.blacklist()
+    #     if not bl_data:
+    #         await ctx.send("✅ No Owner Blacklists set.")
+    #         return
 
-        if user:
-            uid = str(user.id)
-            if uid not in bl_data:
-                await ctx.send(f"✅ {user} has no Owner Blacklist entries.")
-                return
-            data = bl_data[uid]
-            lines = [f"Owner Blacklist for {user}:"]
-            for scope, entry in data.items():
-                scope_label = (
-                    "Global"
-                    if scope == "all"
-                    else "DMs" if scope == "dm" else f"Guild {scope}"
-                )
-                lines.append(f"  Scope: {scope_label}")
-                if entry["all"]:
-                    lines.append("    ALL commands blocked")
-                if entry["cogs"]:
-                    lines.append(f"    Cogs: {', '.join(entry['cogs'])}")
-                if entry["commands"]:
-                    lines.append(f"    Commands: {', '.join(entry['commands'])}")
-            await ctx.send("```" + "\n".join(lines) + "```")
-        else:
-            lines = ["All Owner Blacklists:"]
-            for uid, scopes in bl_data.items():
-                user_obj = self.bot.get_user(int(uid))
-                uname = str(user_obj) if user_obj else uid
-                lines.append(f"{uname}:")
-                for scope, entry in scopes.items():
-                    scope_label = (
-                        "Global"
-                        if scope == "all"
-                        else "DMs" if scope == "dm" else f"Guild {scope}"
-                    )
-                    lines.append(f"  Scope: {scope_label}")
-                    if entry["all"]:
-                        lines.append("    ALL commands blocked")
-                    if entry["cogs"]:
-                        lines.append(f"    Cogs: {', '.join(entry['cogs'])}")
-                    if entry["commands"]:
-                        lines.append(f"    Commands: {', '.join(entry['commands'])}")
-            await ctx.send("```" + "\n".join(lines) + "```")
+    #     if user:
+    #         uid = str(user.id)
+    #         if uid not in bl_data:
+    #             await ctx.send(f"✅ {user} has no Owner Blacklist entries.")
+    #             return
+    #         data = bl_data[uid]
+    #         lines = [f"Owner Blacklist for {user}:"]
+    #         for scope, entry in data.items():
+    #             scope_label = (
+    #                 "Global"
+    #                 if scope == "all"
+    #                 else "DMs" if scope == "dm" else f"Guild {scope}"
+    #             )
+    #             lines.append(f"  Scope: {scope_label}")
+    #             if entry["all"]:
+    #                 lines.append("    ALL commands blocked")
+    #             if entry["cogs"]:
+    #                 lines.append(f"    Cogs: {', '.join(entry['cogs'])}")
+    #             if entry["commands"]:
+    #                 lines.append(f"    Commands: {', '.join(entry['commands'])}")
+    #         await ctx.send("```" + "\n".join(lines) + "```")
+    #     else:
+    #         lines = ["All Owner Blacklists:"]
+    #         for uid, scopes in bl_data.items():
+    #             user_obj = self.bot.get_user(int(uid))
+    #             uname = str(user_obj) if user_obj else uid
+    #             lines.append(f"{uname}:")
+    #             for scope, entry in scopes.items():
+    #                 scope_label = (
+    #                     "Global"
+    #                     if scope == "all"
+    #                     else "DMs" if scope == "dm" else f"Guild {scope}"
+    #                 )
+    #                 lines.append(f"  Scope: {scope_label}")
+    #                 if entry["all"]:
+    #                     lines.append("    ALL commands blocked")
+    #                 if entry["cogs"]:
+    #                     lines.append(f"    Cogs: {', '.join(entry['cogs'])}")
+    #                 if entry["commands"]:
+    #                     lines.append(f"    Commands: {', '.join(entry['commands'])}")
+    #         await ctx.send("```" + "\n".join(lines) + "```")
 
     @ob_group.command(name="status")
     @checks.is_owner()
