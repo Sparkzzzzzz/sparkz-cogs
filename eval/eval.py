@@ -17,9 +17,9 @@ class Eval(commands.Cog):
     async def _get_input(self, ctx, prompt=""):
         """Wait for the author to respond in the same channel."""
         if prompt:
-            await ctx.send(f"📥 {prompt}")
+            await ctx.send(f"{prompt}")
         else:
-            await ctx.send("📥 Input:")
+            await ctx.send("Input:")
 
         try:
             msg = await self.bot.wait_for(
@@ -29,7 +29,7 @@ class Eval(commands.Cog):
             )
             return msg.content
         except asyncio.TimeoutError:
-            await ctx.send("⌛ Input timed out.")
+            await ctx.send("Input timed out.")
             raise
 
     @commands.is_owner()
