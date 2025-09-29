@@ -3,6 +3,7 @@ import traceback
 import textwrap
 import io
 import contextlib
+import asyncio
 from redbot.core import commands
 from redbot.core.bot import Red
 
@@ -27,7 +28,7 @@ class Eval(commands.Cog):
                 timeout=60,
             )
             return msg.content
-        except TimeoutError:
+        except asyncio.TimeoutError:
             await ctx.send("⌛ Input timed out.")
             raise
 
@@ -35,6 +36,7 @@ class Eval(commands.Cog):
     @commands.command(name="eval")
     async def _eval(self, ctx: commands.Context, *, code: str = None):
         """Evaluate Python code or math expressions, supports files and input()."""
+
         # Handle file attachment
         if ctx.message.attachments:
             attachment = ctx.message.attachments[0]
@@ -60,9 +62,16 @@ class Eval(commands.Cog):
             except Exception as e:
                 return await ctx.send(f"```py\nError: {e}\n```")
 
-        # Custom input function
+        # Custom async input function
         async def async_input(prompt=""):
             return await self._get_input(ctx, prompt)
+
+        # Sync wrapper for input() so user can call it like normal
+        loop = asyncio.get_running_loop()
+
+        def sync_input(prompt=""):
+            fut = asyncio.run_coroutine_threadsafe(async_input(prompt), loop)
+            return fut.result()
 
         # Prepare execution environment
         env = {
@@ -73,7 +82,8 @@ class Eval(commands.Cog):
             "guild": ctx.guild,
             "message": ctx.message,
             "_": self.bot,
-            "input": async_input,  # Override built-in input
+            "input": sync_input,  # override input
+            "__builtins__": __builtins__,  # keep builtins available
         }
 
         stdout = io.StringIO()
@@ -94,7 +104,7 @@ class Eval(commands.Cog):
             return await ctx.send(f"```py\n{value}{err}\n```")
 
         value = stdout.getvalue()
-        result = f"{value}{ret if ret is not None else ''}"
+        result = f"{value}{repr(ret) if ret is not None else ''}"
 
         if len(result) == 0:
             result = "✅ No output."
