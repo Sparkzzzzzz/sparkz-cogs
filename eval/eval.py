@@ -9,7 +9,7 @@ from redbot.core.bot import Red
 
 
 class Eval(commands.Cog):
-    """Owner-only Python evaluator with file, input(), and math support."""
+    """Owner-only Python evaluator with file, await input(), and math support."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -35,7 +35,7 @@ class Eval(commands.Cog):
     @commands.is_owner()
     @commands.command(name="eval")
     async def _eval(self, ctx: commands.Context, *, code: str = None):
-        """Evaluate Python code or math expressions, supports files and input()."""
+        """Evaluate Python code or math expressions, supports files and await input()."""
 
         # Handle file attachment
         if ctx.message.attachments:
@@ -66,13 +66,6 @@ class Eval(commands.Cog):
         async def async_input(prompt=""):
             return await self._get_input(ctx, prompt)
 
-        # Sync wrapper for input() so user can call it like normal
-        loop = asyncio.get_running_loop()
-
-        def sync_input(prompt=""):
-            fut = asyncio.run_coroutine_threadsafe(async_input(prompt), loop)
-            return fut.result()
-
         # Prepare execution environment
         env = {
             "bot": self.bot,
@@ -82,8 +75,8 @@ class Eval(commands.Cog):
             "guild": ctx.guild,
             "message": ctx.message,
             "_": self.bot,
-            "input": sync_input,  # override input
-            "__builtins__": __builtins__,  # keep builtins available
+            "input": async_input,  # must be awaited
+            "__builtins__": __builtins__,
         }
 
         stdout = io.StringIO()
