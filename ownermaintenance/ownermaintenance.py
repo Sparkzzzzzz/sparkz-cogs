@@ -6,7 +6,7 @@ import os
 CONFIG_FILE = "ownermaintenance.json"
 
 
-class OwnerMaintainace(commands.Cog):
+class OwnerMaintenance(commands.Cog):
     """Global Owner Maintenance Mode with exceptions"""
 
     def __init__(self, bot):
