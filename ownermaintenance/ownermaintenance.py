@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from redbot.core import commands, checks
 import json
 import os
 
@@ -10,16 +10,18 @@ class OwnerMaintenance(commands.Cog):
     """Global Owner Maintenance Mode with exceptions"""
 
     def __init__(self, bot):
-        self.bot = bot
+        self.bot: commands.Red = bot
         self.data = self.load_config()
         if "maintenance_enabled" not in self.data:
             self.data["maintenance_enabled"] = False
         if "exceptions" not in self.data:
-            self.data["exceptions"] = {}
+            self.data["exceptions"] = (
+                {}
+            )  # {id: {"type":"user"/"role"/"guild","cogs":["all"]}}
         self.save_config()
-        self.bot.add_listener(self._check_maintenance, "on_message")
+        # Add a global check instead of on_message listener
+        self.bot.add_check(self._maintenance_check)
 
-    # --- Config ---
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
@@ -30,30 +32,36 @@ class OwnerMaintenance(commands.Cog):
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.data, f, indent=4)
 
-    # --- Maintenance Check ---
-    async def _check_maintenance(self, message):
-        if message.author.bot:
-            return
+    async def _maintenance_check(self, ctx: commands.Context):
+        """Global check applied to all commands"""
         if not self.data.get("maintenance_enabled", False):
-            return
+            return True
 
-        # Owners bypass
-        app_info = await self.bot.application_info()
-        if message.author.id == app_info.owner.id:
-            return
+        # Owner bypass
+        try:
+            if await self.bot.is_owner(ctx.author):
+                return True
+        except Exception:
+            app_info = await self.bot.application_info()
+            if ctx.author.id == app_info.owner.id:
+                return True
 
-        # IDs for exceptions
-        user_id = str(message.author.id)
-        role_ids = {str(r.id) for r in getattr(message.author, "roles", [])}
-        guild_id = str(message.guild.id) if message.guild else None
+        # DM-safe: owner can use in DMs
+        if ctx.guild is None:
+            return True
+
+        # IDs for exception check
+        user_id = str(ctx.author.id)
+        role_ids = {str(r.id) for r in getattr(ctx.author, "roles", [])}
+        guild_id = str(ctx.guild.id)
 
         for eid, info in self.data.get("exceptions", {}).items():
             if eid in {user_id, guild_id} or eid in role_ids:
-                return
+                return True
 
-        # Send maintenance message
+        # Block command with a maintenance message
         try:
-            await message.channel.send(
+            await ctx.send(
                 embed=discord.Embed(
                     title="🛠️ Bot Under Maintenance",
                     description="The bot is currently under maintenance. Please try again later.",
@@ -63,14 +71,11 @@ class OwnerMaintenance(commands.Cog):
             )
         except discord.Forbidden:
             pass
-        try:
-            await message.delete(delay=1)
-        except discord.Forbidden:
-            pass
 
-    # --- Commands ---
+        raise commands.CheckFailure("Bot is under maintenance")
+
     @commands.group(name="om", invoke_without_command=True)
-    @commands.is_owner()
+    @checks.is_owner()
     async def om(self, ctx):
         await ctx.send(
             "Commands:\n"
@@ -80,7 +85,7 @@ class OwnerMaintenance(commands.Cog):
         )
 
     @om.command(name="toggle")
-    @commands.is_owner()
+    @checks.is_owner()
     async def toggle(self, ctx):
         self.data["maintenance_enabled"] = not self.data.get(
             "maintenance_enabled", False
@@ -91,7 +96,7 @@ class OwnerMaintenance(commands.Cog):
         )
 
     @om.command(name="set")
-    @commands.is_owner()
+    @checks.is_owner()
     async def set_exception(self, ctx, mode: str, target_id: str):
         mode = mode.lower()
         if mode not in {"allow", "deny"}:
@@ -135,7 +140,7 @@ class OwnerMaintenance(commands.Cog):
         await ctx.send(f"✅ {obj_type.capitalize()} `{obj_id}` allowed (exception)")
 
     @om.command(name="list")
-    @commands.is_owner()
+    @checks.is_owner()
     async def list_exceptions(self, ctx):
         exceptions = self.data.get("exceptions", {})
         if not exceptions:
