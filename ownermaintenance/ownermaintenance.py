@@ -15,13 +15,11 @@ class OwnerMaintenance(commands.Cog):
         if "maintenance_enabled" not in self.data:
             self.data["maintenance_enabled"] = False
         if "exceptions" not in self.data:
-            self.data["exceptions"] = (
-                {}
-            )  # {id: {"type":"user"/"role"/"guild","cogs":["all"]}}
+            self.data["exceptions"] = {}
         self.save_config()
         self.bot.add_listener(self._check_maintenance, "on_message")
 
-    # ---------------- Config ---------------- #
+    # --- Config ---
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
@@ -32,30 +30,28 @@ class OwnerMaintenance(commands.Cog):
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.data, f, indent=4)
 
-    # ---------------- Maintenance Check ---------------- #
+    # --- Maintenance Check ---
     async def _check_maintenance(self, message):
         if message.author.bot:
             return
         if not self.data.get("maintenance_enabled", False):
             return
 
-        # Owners bypass maintenance
+        # Owners bypass
         app_info = await self.bot.application_info()
         if message.author.id == app_info.owner.id:
             return
 
-        # Determine IDs for exception check
+        # IDs for exceptions
         user_id = str(message.author.id)
         role_ids = {str(r.id) for r in getattr(message.author, "roles", [])}
         guild_id = str(message.guild.id) if message.guild else None
 
-        # Check exceptions
         for eid, info in self.data.get("exceptions", {}).items():
             if eid in {user_id, guild_id} or eid in role_ids:
-                # exception found
                 return
 
-        # Send maintenance embed
+        # Send maintenance message
         try:
             await message.channel.send(
                 embed=discord.Embed(
@@ -72,16 +68,15 @@ class OwnerMaintenance(commands.Cog):
         except discord.Forbidden:
             pass
 
-    # ---------------- Commands ---------------- #
+    # --- Commands ---
     @commands.group(name="om", invoke_without_command=True)
     @commands.is_owner()
     async def om(self, ctx):
-        """Owner Maintenance management commands"""
         await ctx.send(
             "Commands:\n"
-            "`om toggle` — Toggle global maintenance\n"
+            "`om toggle` — Toggle maintenance\n"
             "`om set allow/deny <id>` — Add/remove exceptions\n"
-            "`om list` — List all exceptions"
+            "`om list` — List exceptions"
         )
 
     @om.command(name="toggle")
@@ -98,7 +93,6 @@ class OwnerMaintenance(commands.Cog):
     @om.command(name="set")
     @commands.is_owner()
     async def set_exception(self, ctx, mode: str, target_id: str):
-        """Add or remove an exception. Target can be user/role/server ID or mention"""
         mode = mode.lower()
         if mode not in {"allow", "deny"}:
             return await ctx.send("❌ Mode must be `allow` or `deny`.")
@@ -106,10 +100,8 @@ class OwnerMaintenance(commands.Cog):
         obj_type = None
         obj_id = None
 
-        # Resolve ID
         if target_id.isdigit():
             obj_id = int(target_id)
-            # Guess type
             if ctx.guild and ctx.guild.get_member(obj_id):
                 obj_type = "user"
             elif ctx.guild and ctx.guild.get_role(obj_id):
@@ -138,7 +130,6 @@ class OwnerMaintenance(commands.Cog):
                 )
             return await ctx.send("❌ That target is not in exceptions")
 
-        # allow
         self.data["exceptions"][key] = {"type": obj_type, "cogs": ["all"]}
         self.save_config()
         await ctx.send(f"✅ {obj_type.capitalize()} `{obj_id}` allowed (exception)")
@@ -149,13 +140,11 @@ class OwnerMaintenance(commands.Cog):
         exceptions = self.data.get("exceptions", {})
         if not exceptions:
             return await ctx.send("No exceptions set.")
-
         lines = []
         for eid, info in exceptions.items():
             lines.append(f"{info['type'].capitalize()} `{eid}` → All commands")
-
         await ctx.send("🛠️ **Maintenance Exceptions:**\n" + "\n".join(lines))
 
 
 async def setup(bot):
-    await bot.add_cog(OwnerMaintainace(bot))
+    await bot.add_cog(OwnerMaintenance(bot))
