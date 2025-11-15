@@ -5,7 +5,7 @@ from redbot.core.bot import Red
 
 
 class TaskPacket(commands.Cog):
-    """Create groups of commands that execute in sequence, with optional scheduling."""
+    """Create groups of commands that execute in sequence, with optional repeated scheduling."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -164,9 +164,13 @@ class TaskPacket(commands.Cog):
 
         async def repeat_loop():
             while True:
-                for cmd in groups[group]:
+                cmds_snapshot = groups[group].copy()  # ensures correct order
+                for cmd in cmds_snapshot:
                     try:
-                        await self.run_bot_command(ctx, cmd)
+                        # fresh context for each command
+                        new_ctx = await self.bot.get_context(ctx.message, cls=type(ctx))
+                        new_ctx.message.content = ctx.prefix + cmd
+                        await self.bot.invoke(new_ctx)
                     except Exception as e:
                         await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
                 await asyncio.sleep(interval)
