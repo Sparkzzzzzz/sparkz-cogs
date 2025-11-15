@@ -2,7 +2,13 @@ import discord
 from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
 import copy
-import types
+
+
+class DummyChannel:
+    """A fake channel that ignores all send calls (for silent execution)."""
+
+    async def send(self, *args, **kwargs):
+        return None  # do nothing
 
 
 class TaskPacket(commands.Cog):
@@ -24,20 +30,16 @@ class TaskPacket(commands.Cog):
         new_message = copy.copy(ctx.message)
         new_message.content = ctx.prefix + command_string
 
-        if silent:
-            # Override the channel's send method to suppress messages
-            original_send = ctx.channel.send
-
-            async def dummy_send(*args, **kwargs):
-                return types.SimpleNamespace(id=0)
-
-            ctx.channel.send = dummy_send
-
         new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
-        await self.bot.invoke(new_ctx)
 
         if silent:
-            ctx.channel.send = original_send  # restore original send method
+            # Replace context channel with a dummy channel that ignores sends
+            real_channel = new_ctx.channel
+            new_ctx.channel = DummyChannel()
+            await self.bot.invoke(new_ctx)
+            new_ctx.channel = real_channel
+        else:
+            await self.bot.invoke(new_ctx)
 
     # ------------------------------------------------------------
     # COMMAND GROUP
