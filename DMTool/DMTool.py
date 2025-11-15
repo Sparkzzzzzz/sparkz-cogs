@@ -1,7 +1,6 @@
 import discord
 from redbot.core import commands, checks
 from redbot.core.bot import Red
-#bam
 
 
 class DMTool(commands.Cog):
@@ -10,25 +9,34 @@ class DMTool(commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
 
-
     # ---------------------------------------
-    # SEND DM COMMAND
+    # SEND DM COMMAND (normal)
     # ---------------------------------------
     @commands.command(aliases=["senddm", "sdm"])
     @checks.is_owner()
     async def send_dm(self, ctx, user: discord.User, *, message: str):
         """Send a plaintext DM to a user."""
-        try:
-            await user.send(message)
-        except discord.Forbidden:
-            return await ctx.send("❌ I cannot DM this user.")
-
+        await self.silent_send_dm(user, message)
         embed = discord.Embed(
             title="DM Sent",
             description=f"Message sent to **{user}** (`{user.id}`)\n\n**Content:**\n{message}",
-            color=discord.Color.green()
+            color=discord.Color.green(),
         )
         await ctx.send(embed=embed)
+
+    # ---------------------------------------
+    # SILENT DM SUBFUNCTION
+    # ---------------------------------------
+    async def silent_send_dm(self, user: discord.User, message: str):
+        """
+        Send a DM to a user WITHOUT posting anything in the invoking channel.
+        Use this in TaskPacket or other silent operations.
+        """
+        try:
+            await user.send(message)
+        except discord.Forbidden:
+            # Optional: log error somewhere if needed
+            pass
 
     # ---------------------------------------
     # CLEAR DM COMMAND
@@ -46,10 +54,9 @@ class DMTool(commands.Cog):
         if channel is None:
             channel = await user.create_dm()
 
-        # If a specific count is given -----------------------------------
+        # If a specific count is given
         if count is not None:
             deleted = 0
-
             async for msg in channel.history(limit=200):
                 if msg.author.id == self.bot.user.id:
                     try:
@@ -57,18 +64,17 @@ class DMTool(commands.Cog):
                         deleted += 1
                     except:
                         pass
-
                     if deleted >= count:
                         break
 
             embed = discord.Embed(
                 title="DM Cleanup Complete",
                 description=f"Deleted **{deleted}** messages from **{user}** (`{user.id}`).",
-                color=discord.Color.green()
+                color=discord.Color.green(),
             )
             return await ctx.send(embed=embed)
 
-        # No count provided → ask for full delete confirmation ------------
+        # No count provided → ask for full delete confirmation
         confirm_embed = discord.Embed(
             title="Clear All DMs?",
             description=(
@@ -77,7 +83,7 @@ class DMTool(commands.Cog):
                 "✔ to confirm\n"
                 "✖ to cancel"
             ),
-            color=discord.Color.orange()
+            color=discord.Color.orange(),
         )
         confirm_msg = await ctx.send(embed=confirm_embed)
 
@@ -101,7 +107,6 @@ class DMTool(commands.Cog):
         except TimeoutError:
             return await ctx.send("⌛ Timed out — no action taken.")
 
-        # ✔ → Delete ALL bot messages
         if str(reaction.emoji) == check:
             deleted = 0
             async for msg in channel.history(limit=500):
@@ -115,8 +120,5 @@ class DMTool(commands.Cog):
             return await ctx.send(
                 f"🧹 Deleted **all ({deleted})** bot-sent DMs with **{user}**."
             )
-
-        # ✖ → Cancel
         else:
             return await ctx.send("❌ Cancelled — no messages deleted.")
-
