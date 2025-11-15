@@ -1,6 +1,7 @@
 import discord
 from redbot.core import commands, checks
 from redbot.core.bot import Red
+#bam
 
 
 class DMTool(commands.Cog):
