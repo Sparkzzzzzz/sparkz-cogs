@@ -3,7 +3,7 @@ from redbot.core import commands, checks
 from redbot.core.bot import Red
 
 
-class dmtool(commands.Cog):
+class DMTool(commands.Cog):
     """Owner-only DM utilities."""
 
     def __init__(self, bot: Red):
