@@ -119,6 +119,3 @@ class DMTool(commands.Cog):
         else:
             return await ctx.send("❌ Cancelled — no messages deleted.")
 
-
-async def setup(bot: Red):
-    await bot.add_cog(dmtool(bot))
