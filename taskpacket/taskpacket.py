@@ -1,7 +1,7 @@
 import discord
 from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
-from types import SimpleNamespace
+import copy
 
 
 class TaskPacket(commands.Cog):
@@ -20,20 +20,10 @@ class TaskPacket(commands.Cog):
     # ------------------------------------------------------------
     async def run_bot_command(self, ctx, command_string: str):
         """Execute a command string as if the user typed it."""
-        # Create a fake message to avoid executing twice
-        fake_message = SimpleNamespace()
-        fake_message.content = ctx.prefix + command_string
-        fake_message.author = ctx.author
-        fake_message.channel = ctx.channel
-        fake_message.guild = ctx.guild
-        fake_message.attachments = []
-        fake_message.mentions = ctx.message.mentions
-        fake_message.mention_everyone = ctx.message.mention_everyone
-        fake_message.id = ctx.message.id
-        fake_message.reference = ctx.message.reference
-        fake_message.clean_content = lambda: fake_message.content
-
-        new_ctx = await self.bot.get_context(fake_message, cls=type(ctx))
+        # Copy the original message to preserve all internal attributes
+        new_message = copy.copy(ctx.message)
+        new_message.content = ctx.prefix + command_string
+        new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
         await self.bot.invoke(new_ctx)
 
     # ------------------------------------------------------------
