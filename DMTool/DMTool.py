@@ -17,7 +17,10 @@ class DMTool(commands.Cog):
     async def send_dm(self, ctx, user: discord.User, *, message: str):
         """Send a DM to a user with confirmation."""
         try:
-            await user.send(message)
+            # Ensure DM channel exists
+            if user.dm_channel is None:
+                await user.create_dm()
+            await user.dm_channel.send(message)
         except discord.Forbidden:
             return await ctx.send("❌ I cannot DM this user.")
 
@@ -36,9 +39,11 @@ class DMTool(commands.Cog):
     async def ss_dm(self, ctx, user: discord.User, *, message: str):
         """Send a DM to a user silently (no confirmation)."""
         try:
-            await user.send(message)
+            if user.dm_channel is None:
+                await user.create_dm()
+            await user.dm_channel.send(message)
         except discord.Forbidden:
-            # Optionally log silently, or just ignore
+            # Silently fail if cannot DM
             pass
 
     # ---------------------------------------
