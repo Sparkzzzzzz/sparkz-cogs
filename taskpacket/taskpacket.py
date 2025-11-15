@@ -2,6 +2,7 @@ import discord
 from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
 import copy
+import types
 
 
 class TaskPacket(commands.Cog):
@@ -18,13 +19,25 @@ class TaskPacket(commands.Cog):
     # ------------------------------------------------------------
     # INTERNAL: simulate a command
     # ------------------------------------------------------------
-    async def run_bot_command(self, ctx, command_string: str):
+    async def run_bot_command(self, ctx, command_string: str, silent=False):
         """Execute a command string as if the user typed it."""
-        # Copy the original message to preserve all internal attributes
         new_message = copy.copy(ctx.message)
         new_message.content = ctx.prefix + command_string
+
+        if silent:
+            # Override the channel's send method to suppress messages
+            original_send = ctx.channel.send
+
+            async def dummy_send(*args, **kwargs):
+                return types.SimpleNamespace(id=0)
+
+            ctx.channel.send = dummy_send
+
         new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
         await self.bot.invoke(new_ctx)
+
+        if silent:
+            ctx.channel.send = original_send  # restore original send method
 
     # ------------------------------------------------------------
     # COMMAND GROUP
@@ -135,21 +148,21 @@ class TaskPacket(commands.Cog):
         await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
-    # RUN TASK PACKET
+    # RUN TASK PACKET (FULLY SILENT)
     # ------------------------------------------------------------
     @taskpacket.command(name="run", aliases=["exec"])
     async def tp_run(self, ctx, group: str):
         groups = await self.config.groups()
         if group not in groups:
-            return await ctx.send("❌ Group not found.")
+            return  # silently fail
 
         cmds = groups[group]
         if not cmds:
-            return await ctx.send("⚠ Group is empty.")
+            return  # silently do nothing
 
         for cmd in cmds:
             try:
-                await self.run_bot_command(ctx, cmd)
+                await self.run_bot_command(ctx, cmd, silent=True)
             except Exception as e:
                 await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
         await ctx.message.add_reaction("✅")
