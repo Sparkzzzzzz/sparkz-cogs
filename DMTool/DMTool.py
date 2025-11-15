@@ -9,15 +9,14 @@ class DMTool(commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
 
-    # ---------------------------------------
+    # -------------------------------
     # NORMAL SEND DM
-    # ---------------------------------------
+    # -------------------------------
     @commands.command(aliases=["senddm", "sdm"])
     @checks.is_owner()
     async def send_dm(self, ctx, user: discord.User, *, message: str):
         """Send a DM to a user with confirmation."""
         try:
-            # Ensure DM channel exists
             if user.dm_channel is None:
                 await user.create_dm()
             await user.dm_channel.send(message)
@@ -31,9 +30,9 @@ class DMTool(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    # ---------------------------------------
+    # -------------------------------
     # SILENT SEND DM
-    # ---------------------------------------
+    # -------------------------------
     @commands.command(name="ss_dm", aliases=["silent_dm"])
     @checks.is_owner()
     async def ss_dm(self, ctx, user: discord.User, *, message: str):
@@ -43,12 +42,12 @@ class DMTool(commands.Cog):
                 await user.create_dm()
             await user.dm_channel.send(message)
         except discord.Forbidden:
-            # Silently fail if cannot DM
+            # Silently fail if the user cannot be DMed
             pass
 
-    # ---------------------------------------
+    # -------------------------------
     # CLEAR DM COMMAND
-    # ---------------------------------------
+    # -------------------------------
     @commands.command(aliases=["cleardm", "cdm"])
     @checks.is_owner()
     async def clear_dm(self, ctx, user: discord.User, count: int = None):
@@ -56,12 +55,12 @@ class DMTool(commands.Cog):
         Delete bot-sent messages from a user's DM.
         If `count` is not provided → ask for confirmation to delete ALL.
         """
-        # Fetch DM channel
+        # Ensure DM channel exists
         channel = user.dm_channel
         if channel is None:
             channel = await user.create_dm()
 
-        # If a specific count is given
+        # Delete a specific number of messages
         if count is not None:
             deleted = 0
             async for msg in channel.history(limit=200):
@@ -81,7 +80,7 @@ class DMTool(commands.Cog):
             )
             return await ctx.send(embed=embed)
 
-        # No count provided → ask for full delete confirmation
+        # No count provided → ask for full deletion confirmation
         confirm_embed = discord.Embed(
             title="Clear All DMs?",
             description=(
@@ -94,27 +93,26 @@ class DMTool(commands.Cog):
         )
         confirm_msg = await ctx.send(embed=confirm_embed)
 
-        check = "✔"
-        cancel = "✖"
-
-        await confirm_msg.add_reaction(check)
-        await confirm_msg.add_reaction(cancel)
+        check_emoji = "✔"
+        cancel_emoji = "✖"
+        await confirm_msg.add_reaction(check_emoji)
+        await confirm_msg.add_reaction(cancel_emoji)
 
         def reaction_check(reaction, reactor):
             return (
                 reactor == ctx.author
                 and reaction.message.id == confirm_msg.id
-                and str(reaction.emoji) in [check, cancel]
+                and str(reaction.emoji) in [check_emoji, cancel_emoji]
             )
 
         try:
-            reaction, reactor = await self.bot.wait_for(
+            reaction, _ = await self.bot.wait_for(
                 "reaction_add", timeout=30.0, check=reaction_check
             )
         except TimeoutError:
             return await ctx.send("⌛ Timed out — no action taken.")
 
-        if str(reaction.emoji) == check:
+        if str(reaction.emoji) == check_emoji:
             deleted = 0
             async for msg in channel.history(limit=500):
                 if msg.author.id == self.bot.user.id:
@@ -123,7 +121,6 @@ class DMTool(commands.Cog):
                         deleted += 1
                     except:
                         pass
-
             return await ctx.send(
                 f"🧹 Deleted **all ({deleted})** bot-sent DMs with **{user}**."
             )
