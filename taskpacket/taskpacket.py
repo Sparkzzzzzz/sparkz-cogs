@@ -1,6 +1,7 @@
 import discord
 from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
+from types import SimpleNamespace
 
 
 class TaskPacket(commands.Cog):
@@ -19,10 +20,20 @@ class TaskPacket(commands.Cog):
     # ------------------------------------------------------------
     async def run_bot_command(self, ctx, command_string: str):
         """Execute a command string as if the user typed it."""
-        # Make context using the original message
-        new_ctx = await self.bot.get_context(ctx.message, cls=type(ctx))
-        # Temporarily replace content
-        new_ctx.message.content = ctx.prefix + command_string
+        # Create a fake message to avoid executing twice
+        fake_message = SimpleNamespace()
+        fake_message.content = ctx.prefix + command_string
+        fake_message.author = ctx.author
+        fake_message.channel = ctx.channel
+        fake_message.guild = ctx.guild
+        fake_message.attachments = []
+        fake_message.mentions = ctx.message.mentions
+        fake_message.mention_everyone = ctx.message.mention_everyone
+        fake_message.id = ctx.message.id
+        fake_message.reference = ctx.message.reference
+        fake_message.clean_content = lambda: fake_message.content
+
+        new_ctx = await self.bot.get_context(fake_message, cls=type(ctx))
         await self.bot.invoke(new_ctx)
 
     # ------------------------------------------------------------
@@ -33,7 +44,7 @@ class TaskPacket(commands.Cog):
     async def taskpacket(self, ctx):
         """TaskPacket: manage groups of commands."""
         if ctx.invoked_subcommand is None:
-            return  # do absolutely nothing
+            return  # do nothing
 
     # ------------------------------------------------------------
     # LIST GROUPS
@@ -70,7 +81,7 @@ class TaskPacket(commands.Cog):
 
         groups[group] = []
         await self.config.groups.set(groups)
-        await ctx.send(f"✅ Created group **{group}**")
+        await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
     # DELETE GROUP
@@ -83,7 +94,7 @@ class TaskPacket(commands.Cog):
 
         del groups[group]
         await self.config.groups.set(groups)
-        await ctx.send(f"🗑 Deleted group **{group}**")
+        await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
     # ADD COMMAND
@@ -96,7 +107,7 @@ class TaskPacket(commands.Cog):
 
         groups[group].append(command_string)
         await self.config.groups.set(groups)
-        await ctx.send(f"📌 Added to **{group}**:\n`{command_string}`")
+        await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
     # REMOVE COMMAND (by index)
@@ -111,9 +122,9 @@ class TaskPacket(commands.Cog):
         if not (1 <= index <= len(cmds)):
             return await ctx.send("❌ Invalid index.")
 
-        removed = cmds.pop(index - 1)
+        cmds.pop(index - 1)
         await self.config.groups.set(groups)
-        await ctx.send(f"🧹 Removed `{removed}` from **{group}**")
+        await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
     # MOVE / REORDER
@@ -131,7 +142,7 @@ class TaskPacket(commands.Cog):
         cmd = cmds.pop(old_index - 1)
         cmds.insert(new_index - 1, cmd)
         await self.config.groups.set(groups)
-        await ctx.send(f"🔀 Moved command to position {new_index} in **{group}**")
+        await ctx.message.add_reaction("✅")
 
     # ------------------------------------------------------------
     # RUN TASK PACKET
@@ -146,13 +157,12 @@ class TaskPacket(commands.Cog):
         if not cmds:
             return await ctx.send("⚠ Group is empty.")
 
-        await ctx.send(f"▶ Running **{group}**…")
         for cmd in cmds:
             try:
                 await self.run_bot_command(ctx, cmd)
             except Exception as e:
                 await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
-        await ctx.send(f"✅ Completed **{group}**")
+        await ctx.message.add_reaction("✅")
 
 
 async def setup(bot: Red):
