@@ -13,7 +13,7 @@ class TaskPacket(commands.Cog):
             self, identifier=762829303, force_registration=True
         )
         self.config.register_global(groups={})
-        self.repeat_tasks = {}  # store repeating tasks per group
+        self.repeat_tasks = {}  # in-memory repeating tasks, stop on unload/reload
 
     # -------------------------------
     # INTERNAL: Run a command
@@ -143,11 +143,11 @@ class TaskPacket(commands.Cog):
         await ctx.send(f"✅ Completed **{group}**")
 
     # -------------------------------
-    # REPEAT TASK GROUP
+    # REPEAT TASK GROUP (IN-MEMORY ONLY)
     # -------------------------------
     @taskpacket.command(name="repeat")
     async def tp_repeat(self, ctx, group: str, interval: int):
-        """Run a task group repeatedly every <interval> seconds."""
+        """Run a task group repeatedly every <interval> seconds (in-memory only)."""
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
@@ -164,10 +164,10 @@ class TaskPacket(commands.Cog):
 
         async def repeat_loop():
             while True:
-                cmds_snapshot = groups[group].copy()  # ensures correct order
+                # make a fresh snapshot for each iteration to preserve order
+                cmds_snapshot = groups[group].copy()
                 for cmd in cmds_snapshot:
                     try:
-                        # fresh context for each command
                         new_ctx = await self.bot.get_context(ctx.message, cls=type(ctx))
                         new_ctx.message.content = ctx.prefix + cmd
                         await self.bot.invoke(new_ctx)
