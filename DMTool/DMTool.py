@@ -3,7 +3,7 @@ from redbot.core import commands, checks
 from redbot.core.bot import Red
 
 
-class DMTool(commands.Cog):
+class dmtool(commands.Cog):
     """Owner-only DM utilities."""
 
     def __init__(self, bot: Red):
@@ -120,4 +120,4 @@ class DMTool(commands.Cog):
 
 
 async def setup(bot: Red):
-    await bot.add_cog(DMTool(bot))
+    await bot.add_cog(dmtool(bot))

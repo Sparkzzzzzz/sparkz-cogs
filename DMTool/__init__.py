@@ -1,5 +1,5 @@
-from .DMTool import DMTool
+from .dmtool import dmtool
 
 
 async def setup(bot):
-    await bot.add_cog(DMTool(bot))
+    await bot.add_cog(dmtool(bot))
