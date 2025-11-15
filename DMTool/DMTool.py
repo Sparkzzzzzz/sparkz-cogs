@@ -9,6 +9,7 @@ class DMTool(commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
 
+
     # ---------------------------------------
     # SEND DM COMMAND
     # ---------------------------------------
