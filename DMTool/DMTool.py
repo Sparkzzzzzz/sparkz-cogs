@@ -10,13 +10,17 @@ class DMTool(commands.Cog):
         self.bot = bot
 
     # ---------------------------------------
-    # SEND DM COMMAND (normal)
+    # NORMAL SEND DM
     # ---------------------------------------
     @commands.command(aliases=["senddm", "sdm"])
     @checks.is_owner()
     async def send_dm(self, ctx, user: discord.User, *, message: str):
-        """Send a plaintext DM to a user."""
-        await self.silent_send_dm(user, message)
+        """Send a DM to a user with confirmation."""
+        try:
+            await user.send(message)
+        except discord.Forbidden:
+            return await ctx.send("❌ I cannot DM this user.")
+
         embed = discord.Embed(
             title="DM Sent",
             description=f"Message sent to **{user}** (`{user.id}`)\n\n**Content:**\n{message}",
@@ -25,17 +29,16 @@ class DMTool(commands.Cog):
         await ctx.send(embed=embed)
 
     # ---------------------------------------
-    # SILENT DM SUBFUNCTION
+    # SILENT SEND DM
     # ---------------------------------------
-    async def silent_send_dm(self, user: discord.User, message: str):
-        """
-        Send a DM to a user WITHOUT posting anything in the invoking channel.
-        Use this in TaskPacket or other silent operations.
-        """
+    @commands.command(name="ss_dm", aliases=["silent_dm"])
+    @checks.is_owner()
+    async def ss_dm(self, ctx, user: discord.User, *, message: str):
+        """Send a DM to a user silently (no confirmation)."""
         try:
             await user.send(message)
         except discord.Forbidden:
-            # Optional: log error somewhere if needed
+            # Optionally log silently, or just ignore
             pass
 
     # ---------------------------------------
@@ -48,7 +51,6 @@ class DMTool(commands.Cog):
         Delete bot-sent messages from a user's DM.
         If `count` is not provided → ask for confirmation to delete ALL.
         """
-
         # Fetch DM channel
         channel = user.dm_channel
         if channel is None:
@@ -122,3 +124,7 @@ class DMTool(commands.Cog):
             )
         else:
             return await ctx.send("❌ Cancelled — no messages deleted.")
+
+
+async def setup(bot: Red):
+    await bot.add_cog(DMTool(bot))
