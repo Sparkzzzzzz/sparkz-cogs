@@ -1,45 +1,32 @@
+import asyncio
 import discord
-from redbot.core import commands, Config, checks
+from redbot.core import commands, checks, Config
 from redbot.core.bot import Red
-import copy
 
 
 class TaskPacket(commands.Cog):
-    """Create groups of commands that execute in sequence."""
+    """Create groups of commands that execute in sequence, with optional scheduling."""
 
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(
             self, identifier=762829303, force_registration=True
         )
-        # groups: { "groupname": ["cmd arg1", "cmd arg2"] }
         self.config.register_global(groups={})
+        self.repeat_tasks = {}  # store repeating tasks per group
 
-    # ------------------------------------------------------------
-    # INTERNAL: simulate a command
-    # ------------------------------------------------------------
-    async def run_bot_command(self, ctx, command_string: str, silent=False):
+    # -------------------------------
+    # INTERNAL: Run a command
+    # -------------------------------
+    async def run_bot_command(self, ctx, command_string: str):
         """Execute a command string as if the user typed it."""
-        new_message = copy.copy(ctx.message)
-        new_message.content = ctx.prefix + command_string
-        new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
-
-        if silent:
-            # replace send method with dummy to suppress confirmation messages
-            original_send = new_ctx.send
-
-            async def dummy_send(*args, **kwargs):
-                return None
-
-            new_ctx.send = dummy_send
-
+        new_ctx = await self.bot.get_context(ctx.message, cls=type(ctx))
+        new_ctx.message.content = ctx.prefix + command_string
         await self.bot.invoke(new_ctx)
-        if silent:
-            new_ctx.send = original_send
 
-    # ------------------------------------------------------------
+    # -------------------------------
     # COMMAND GROUP
-    # ------------------------------------------------------------
+    # -------------------------------
     @commands.group(name="taskpacket", aliases=["tp"])
     @checks.admin()
     async def taskpacket(self, ctx):
@@ -47,9 +34,9 @@ class TaskPacket(commands.Cog):
         if ctx.invoked_subcommand is None:
             return
 
-    # ------------------------------------------------------------
+    # -------------------------------
     # LIST GROUPS
-    # ------------------------------------------------------------
+    # -------------------------------
     @taskpacket.command(name="list")
     async def tp_list(self, ctx):
         groups = await self.config.groups()
@@ -61,18 +48,16 @@ class TaskPacket(commands.Cog):
             description="All groups and their commands:",
             color=discord.Color.blue(),
         )
-
         for name, cmds in groups.items():
             formatted = (
                 "\n".join(f"**{i+1}.** `{c}`" for i, c in enumerate(cmds)) or "*empty*"
             )
             embed.add_field(name=name, value=formatted, inline=False)
-
         await ctx.send(embed=embed)
 
-    # ------------------------------------------------------------
-    # CREATE, DELETE, ADD, REMOVE, MOVE (normal messages)
-    # ------------------------------------------------------------
+    # -------------------------------
+    # CREATE GROUP
+    # -------------------------------
     @taskpacket.command(name="create")
     async def tp_create(self, ctx, group: str):
         groups = await self.config.groups()
@@ -82,6 +67,9 @@ class TaskPacket(commands.Cog):
         await self.config.groups.set(groups)
         await ctx.send(f"✅ Created group **{group}**")
 
+    # -------------------------------
+    # DELETE GROUP
+    # -------------------------------
     @taskpacket.command(name="delete")
     async def tp_delete(self, ctx, group: str):
         groups = await self.config.groups()
@@ -91,6 +79,9 @@ class TaskPacket(commands.Cog):
         await self.config.groups.set(groups)
         await ctx.send(f"🗑 Deleted group **{group}**")
 
+    # -------------------------------
+    # ADD COMMAND
+    # -------------------------------
     @taskpacket.command(name="add")
     async def tp_add(self, ctx, group: str, *, command_string: str):
         groups = await self.config.groups()
@@ -100,6 +91,9 @@ class TaskPacket(commands.Cog):
         await self.config.groups.set(groups)
         await ctx.send(f"📌 Added to **{group}**:\n`{command_string}`")
 
+    # -------------------------------
+    # REMOVE COMMAND
+    # -------------------------------
     @taskpacket.command(name="remove")
     async def tp_remove(self, ctx, group: str, index: int):
         groups = await self.config.groups()
@@ -112,6 +106,9 @@ class TaskPacket(commands.Cog):
         await self.config.groups.set(groups)
         await ctx.send(f"🧹 Removed `{removed}` from **{group}**")
 
+    # -------------------------------
+    # MOVE COMMAND
+    # -------------------------------
     @taskpacket.command(name="move")
     async def tp_move(self, ctx, group: str, old_index: int, new_index: int):
         groups = await self.config.groups()
@@ -125,15 +122,14 @@ class TaskPacket(commands.Cog):
         await self.config.groups.set(groups)
         await ctx.send(f"🔀 Moved command to position {new_index} in **{group}**")
 
-    # ------------------------------------------------------------
-    # RUN TASK PACKET
-    # ------------------------------------------------------------
+    # -------------------------------
+    # RUN TASK GROUP
+    # -------------------------------
     @taskpacket.command(name="run", aliases=["exec"])
     async def tp_run(self, ctx, group: str):
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
-
         cmds = groups[group]
         if not cmds:
             return await ctx.send("⚠ Group is empty.")
@@ -141,14 +137,54 @@ class TaskPacket(commands.Cog):
         await ctx.send(f"▶ Running **{group}**…")
         for cmd in cmds:
             try:
-                # Detect if command is send_dm and suppress confirmation
-                if cmd.strip().startswith("send_dm"):
-                    await self.run_bot_command(ctx, cmd, silent=True)
-                else:
-                    await self.run_bot_command(ctx, cmd)
+                await self.run_bot_command(ctx, cmd)
             except Exception as e:
                 await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
         await ctx.send(f"✅ Completed **{group}**")
+
+    # -------------------------------
+    # REPEAT TASK GROUP
+    # -------------------------------
+    @taskpacket.command(name="repeat")
+    async def tp_repeat(self, ctx, group: str, interval: int):
+        """Run a task group repeatedly every <interval> seconds."""
+        groups = await self.config.groups()
+        if group not in groups:
+            return await ctx.send("❌ Group not found.")
+        if interval < 1:
+            return await ctx.send("❌ Interval must be at least 1 second.")
+
+        # Stop previous loop if exists
+        if group in self.repeat_tasks:
+            self.repeat_tasks[group].cancel()
+
+        await ctx.send(
+            f"🔁 Started repeating **{group}** every **{interval} seconds**."
+        )
+
+        async def repeat_loop():
+            while True:
+                for cmd in groups[group]:
+                    try:
+                        await self.run_bot_command(ctx, cmd)
+                    except Exception as e:
+                        await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
+                await asyncio.sleep(interval)
+
+        self.repeat_tasks[group] = self.bot.loop.create_task(repeat_loop())
+
+    # -------------------------------
+    # STOP REPEATING TASK
+    # -------------------------------
+    @taskpacket.command(name="stoprepeat")
+    async def tp_stoprepeat(self, ctx, group: str):
+        """Stop a repeating task group."""
+        if group not in self.repeat_tasks:
+            return await ctx.send(f"⚠ No repeating task found for **{group}**.")
+
+        self.repeat_tasks[group].cancel()
+        del self.repeat_tasks[group]
+        await ctx.send(f"⏹ Stopped repeating **{group}**.")
 
 
 async def setup(bot: Red):
