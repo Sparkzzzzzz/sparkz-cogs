@@ -4,21 +4,6 @@ from redbot.core.bot import Red
 import copy
 
 
-class SilentChannel:
-    """A fake channel that ignores all send calls but preserves required attributes."""
-
-    def __init__(self, original_channel):
-        self.id = original_channel.id
-        self.guild = original_channel.guild
-        self.name = getattr(original_channel, "name", "silent")
-        self.type = getattr(original_channel, "type", discord.ChannelType.text)
-        self.category = getattr(original_channel, "category", None)
-        self.permissions_for = lambda member: original_channel.permissions_for(member)
-
-    async def send(self, *args, **kwargs):
-        return None  # do nothing
-
-
 class TaskPacket(commands.Cog):
     """Create groups of commands that execute in sequence."""
 
@@ -40,13 +25,17 @@ class TaskPacket(commands.Cog):
         new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
 
         if silent:
-            # Replace context channel with a silent channel
-            real_channel = new_ctx.channel
-            new_ctx.channel = SilentChannel(real_channel)
-            await self.bot.invoke(new_ctx)
-            new_ctx.channel = real_channel
-        else:
-            await self.bot.invoke(new_ctx)
+            # replace send method with dummy to suppress confirmation messages
+            original_send = new_ctx.send
+
+            async def dummy_send(*args, **kwargs):
+                return None
+
+            new_ctx.send = dummy_send
+
+        await self.bot.invoke(new_ctx)
+        if silent:
+            new_ctx.send = original_send
 
     # ------------------------------------------------------------
     # COMMAND GROUP
@@ -56,14 +45,13 @@ class TaskPacket(commands.Cog):
     async def taskpacket(self, ctx):
         """TaskPacket: manage groups of commands."""
         if ctx.invoked_subcommand is None:
-            return  # do nothing
+            return
 
     # ------------------------------------------------------------
     # LIST GROUPS
     # ------------------------------------------------------------
     @taskpacket.command(name="list")
     async def tp_list(self, ctx):
-        """List all task groups."""
         groups = await self.config.groups()
         if not groups:
             return await ctx.send("No task groups created yet.")
@@ -83,98 +71,84 @@ class TaskPacket(commands.Cog):
         await ctx.send(embed=embed)
 
     # ------------------------------------------------------------
-    # CREATE GROUP
+    # CREATE, DELETE, ADD, REMOVE, MOVE (normal messages)
     # ------------------------------------------------------------
     @taskpacket.command(name="create")
     async def tp_create(self, ctx, group: str):
         groups = await self.config.groups()
         if group in groups:
             return await ctx.send("❌ Group already exists.")
-
         groups[group] = []
         await self.config.groups.set(groups)
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"✅ Created group **{group}**")
 
-    # ------------------------------------------------------------
-    # DELETE GROUP
-    # ------------------------------------------------------------
     @taskpacket.command(name="delete")
     async def tp_delete(self, ctx, group: str):
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
-
         del groups[group]
         await self.config.groups.set(groups)
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"🗑 Deleted group **{group}**")
 
-    # ------------------------------------------------------------
-    # ADD COMMAND
-    # ------------------------------------------------------------
     @taskpacket.command(name="add")
     async def tp_add(self, ctx, group: str, *, command_string: str):
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
-
         groups[group].append(command_string)
         await self.config.groups.set(groups)
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"📌 Added to **{group}**:\n`{command_string}`")
 
-    # ------------------------------------------------------------
-    # REMOVE COMMAND (by index)
-    # ------------------------------------------------------------
     @taskpacket.command(name="remove")
     async def tp_remove(self, ctx, group: str, index: int):
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
-
         cmds = groups[group]
         if not (1 <= index <= len(cmds)):
             return await ctx.send("❌ Invalid index.")
-
-        cmds.pop(index - 1)
+        removed = cmds.pop(index - 1)
         await self.config.groups.set(groups)
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"🧹 Removed `{removed}` from **{group}**")
 
-    # ------------------------------------------------------------
-    # MOVE / REORDER
-    # ------------------------------------------------------------
     @taskpacket.command(name="move")
     async def tp_move(self, ctx, group: str, old_index: int, new_index: int):
         groups = await self.config.groups()
         if group not in groups:
             return await ctx.send("❌ Group not found.")
-
         cmds = groups[group]
         if not (1 <= old_index <= len(cmds)) or not (1 <= new_index <= len(cmds)):
             return await ctx.send("❌ Invalid indexes.")
-
         cmd = cmds.pop(old_index - 1)
         cmds.insert(new_index - 1, cmd)
         await self.config.groups.set(groups)
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"🔀 Moved command to position {new_index} in **{group}**")
 
     # ------------------------------------------------------------
-    # RUN TASK PACKET (FULLY SILENT)
+    # RUN TASK PACKET
     # ------------------------------------------------------------
     @taskpacket.command(name="run", aliases=["exec"])
     async def tp_run(self, ctx, group: str):
         groups = await self.config.groups()
         if group not in groups:
-            return  # silently fail
+            return await ctx.send("❌ Group not found.")
 
         cmds = groups[group]
         if not cmds:
-            return  # silently do nothing
+            return await ctx.send("⚠ Group is empty.")
 
+        await ctx.send(f"▶ Running **{group}**…")
         for cmd in cmds:
             try:
-                await self.run_bot_command(ctx, cmd, silent=True)
+                # Detect if command is send_dm and suppress confirmation
+                if cmd.strip().startswith("send_dm"):
+                    await self.run_bot_command(ctx, cmd, silent=True)
+                else:
+                    await self.run_bot_command(ctx, cmd)
             except Exception as e:
                 await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
-        await ctx.message.add_reaction("✅")
+        await ctx.send(f"✅ Completed **{group}**")
 
 
 async def setup(bot: Red):
