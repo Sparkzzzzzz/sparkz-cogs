@@ -4,8 +4,16 @@ from redbot.core.bot import Red
 import copy
 
 
-class DummyChannel:
-    """A fake channel that ignores all send calls (for silent execution)."""
+class SilentChannel:
+    """A fake channel that ignores all send calls but preserves required attributes."""
+
+    def __init__(self, original_channel):
+        self.id = original_channel.id
+        self.guild = original_channel.guild
+        self.name = getattr(original_channel, "name", "silent")
+        self.type = getattr(original_channel, "type", discord.ChannelType.text)
+        self.category = getattr(original_channel, "category", None)
+        self.permissions_for = lambda member: original_channel.permissions_for(member)
 
     async def send(self, *args, **kwargs):
         return None  # do nothing
@@ -29,13 +37,12 @@ class TaskPacket(commands.Cog):
         """Execute a command string as if the user typed it."""
         new_message = copy.copy(ctx.message)
         new_message.content = ctx.prefix + command_string
-
         new_ctx = await self.bot.get_context(new_message, cls=type(ctx))
 
         if silent:
-            # Replace context channel with a dummy channel that ignores sends
+            # Replace context channel with a silent channel
             real_channel = new_ctx.channel
-            new_ctx.channel = DummyChannel()
+            new_ctx.channel = SilentChannel(real_channel)
             await self.bot.invoke(new_ctx)
             new_ctx.channel = real_channel
         else:
