@@ -93,7 +93,7 @@ class TaskPacket(commands.Cog):
     # BASE COMMAND GROUP
     # =====================================================================
     @commands.group(name="taskpacket", aliases=["tp"])
-    @checks.admin()
+    @checks.is_owner()
     async def taskpacket(self, ctx):
         if ctx.invoked_subcommand is None:
             pass
