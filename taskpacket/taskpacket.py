@@ -1,5 +1,6 @@
 import asyncio
 import discord
+from discord.message import Message
 from redbot.core import commands, checks, Config
 from redbot.core.bot import Red
 
@@ -13,23 +14,47 @@ class TaskPacket(commands.Cog):
             self, identifier=762829303, force_registration=True
         )
         self.config.register_global(groups={})
-        self.repeat_tasks = {}  # in-memory repeat tasks, stop on reload
+        self.repeat_tasks = {}  # in-memory only — does NOT persist after reload
 
     # ============================================================
-    # INTERNAL: SAFE COMMAND RUNNER (NO message.copy())
+    # INTERNAL: TRUE SAFE COMMAND RUNNER (REAL discord.Message)
     # ============================================================
     async def run_bot_command(self, ctx, command_string: str):
         """
-        Safely execute another bot command as if the user typed it.
-        This creates a lightweight fake message carrying required fields.
+        Safely execute another bot command by creating a real fake Message object.
         """
-        fake = discord.Object(id=ctx.message.id)
-        fake.content = ctx.prefix + command_string
-        fake.author = ctx.author
-        fake.channel = ctx.channel
-        fake.guild = ctx.guild
 
-        new_ctx = await self.bot.get_context(fake, cls=type(ctx))
+        # borrow internal state from the original message
+        state = ctx.message._state
+
+        # build a fully valid discord.Message object
+        fake_message = Message(
+            state=state,
+            channel=ctx.channel,
+            data={
+                "id": ctx.message.id,
+                "type": 0,
+                "content": ctx.prefix + command_string,
+                "channel_id": ctx.channel.id,
+                "author": {
+                    "id": ctx.author.id,
+                    "username": ctx.author.name,
+                    "avatar": ctx.author.avatar.key if ctx.author.avatar else None,
+                    "discriminator": ctx.author.discriminator,
+                    "public_flags": ctx.author.public_flags.value,
+                },
+                "attachments": [],
+                "embeds": [],
+                "mentions": [],
+                "mention_roles": [],
+                "pinned": False,
+                "tts": False,
+                "timestamp": ctx.message.created_at.isoformat(),
+            },
+        )
+
+        # get a new context from the fake message
+        new_ctx = await self.bot.get_context(fake_message, cls=type(ctx))
         await self.bot.invoke(new_ctx)
 
     # ============================================================
@@ -93,7 +118,7 @@ class TaskPacket(commands.Cog):
         await ctx.send(f"🗑 Deleted group **{group}**")
 
     # ============================================================
-    # ADD COMMAND TO GROUP
+    # ADD COMMAND
     # ============================================================
     @taskpacket.command(name="add")
     async def tp_add(self, ctx, group: str, *, command_string: str):
@@ -181,7 +206,7 @@ class TaskPacket(commands.Cog):
         if interval < 1:
             return await ctx.send("❌ Interval must be at least 1 second.")
 
-        # stop old loop
+        # stop old loop if exists
         if group in self.repeat_tasks:
             self.repeat_tasks[group].cancel()
             del self.repeat_tasks[group]
