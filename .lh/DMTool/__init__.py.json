@@ -1,0 +1,18 @@
+{
+    "sourceFile": "DMTool/__init__.py",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 0,
+            "patches": [
+                {
+                    "date": 1763403287797,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                }
+            ],
+            "date": 1763403287797,
+            "name": "Commit-0",
+            "content": "from .dmtool import DMTool  # import the class\r\n\r\n#\r\nasync def setup(bot):\r\n    await bot.add_cog(DMTool(bot))  # use the correct class name\r\n"
+        }
+    ]
+}
