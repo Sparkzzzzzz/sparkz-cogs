@@ -465,19 +465,78 @@ class TaskPacket(commands.Cog):
     @commands.is_owner()
     @taskpacket.command(name="checkghost")
     async def tp_checkghost(self, ctx):
-        tasks = []
-        for task in asyncio.all_tasks():
-            if (
-                "_repeat_loop" in str(task)
-                or "run_bot_command_scheduled" in str(task)
-                or "run_bot_command_direct" in str(task)
-            ):
-                tasks.append(str(task))
+        # improved: only flag _repeat_loop tasks that are NOT tracked in self.running_tasks
+        stored = await self.config.repeats()
+        tracked_tasks = set(self.running_tasks.values())
+        ghosts = []
 
-        if not tasks:
+        for task in asyncio.all_tasks():
+            try:
+                coro = task.get_coro()
+                # identify repeat loop coroutines by name or qualname
+                coro_name = getattr(coro, "__name__", str(coro))
+                coro_qname = getattr(coro, "__qualname__", None)
+                if "_repeat_loop" in coro_name or (
+                    coro_qname and "_repeat_loop" in coro_qname
+                ):
+                    # if this task object is not one of our tracked running tasks, it's a ghost
+                    if task not in tracked_tasks:
+                        ghosts.append(str(task))
+            except Exception:
+                # if something odd happens, include the representation to inspect
+                if "_repeat_loop" in str(task):
+                    ghosts.append(str(task))
+
+        if not ghosts:
             await ctx.send("✅ No ghost repeat tasks exist.")
         else:
-            await ctx.send("⚠️ Ghost tasks found:\n```\n" + "\n".join(tasks) + "\n```")
+            await ctx.send("⚠️ Ghost tasks found:\n```\n" + "\n".join(ghosts) + "\n```")
+
+    # ============================================================
+    # PURGE GHOSTS - cancel any dangling repeat loops not tracked
+    # ============================================================
+    @commands.is_owner()
+    @taskpacket.command(name="purgeghosts")
+    async def tp_purgeghosts(self, ctx):
+        stored = await self.config.repeats()
+        tracked_tasks = set(self.running_tasks.values())
+        killed = 0
+        killed_info = []
+
+        for task in list(asyncio.all_tasks()):
+            try:
+                coro = task.get_coro()
+                coro_name = getattr(coro, "__name__", str(coro))
+                coro_qname = getattr(coro, "__qualname__", None)
+                if (
+                    "_repeat_loop" in coro_name
+                    or (coro_qname and "_repeat_loop" in coro_qname)
+                    or "_repeat_loop" in str(coro)
+                ):
+                    if task not in tracked_tasks:
+                        try:
+                            task.cancel()
+                            killed += 1
+                            killed_info.append(str(task))
+                        except Exception:
+                            pass
+            except Exception:
+                if "_repeat_loop" in str(task):
+                    try:
+                        task.cancel()
+                        killed += 1
+                        killed_info.append(str(task))
+                    except Exception:
+                        pass
+
+        if killed == 0:
+            await ctx.send("✅ No ghost repeat tasks found to purge.")
+        else:
+            # report summary (don't spam with huge dumps)
+            summary = "\n".join(killed_info[:10])
+            if len(killed_info) > 10:
+                summary += f"\n...and {len(killed_info)-10} more"
+            await ctx.send(f"☠️ Purged {killed} ghost task(s):\n```\n{summary}\n```")
 
     # ============================================================
     # COG UNLOAD
