@@ -43,16 +43,16 @@ class TaskPacket(commands.Cog):
             self, identifier=762829303, force_registration=True
         )
 
-        # Keep the same keys you used
+        # Keep groups and repeats in config (primitives only)
         self.config.register_global(groups={})
         self.config.register_global(repeats={})
         # Format in config.repeats:
-        # key = task_id
-        # value = { group, interval, interval_raw, channel_id, next_run, state_repr, author_id, prefix }
+        # key = task_id (string)
+        # value = { group, interval, interval_raw, channel_id, next_run, author_id, prefix }
 
-        self.running_tasks = {}  # task_id -> asyncio task
+        self.running_tasks = {}  # task_id -> asyncio Task
 
-        # restore on startup/reload
+        # restore tasks on startup (in-memory only tasks are re-created from config)
         asyncio.create_task(self._startup_load())
 
     # ============================================================
@@ -61,109 +61,51 @@ class TaskPacket(commands.Cog):
     async def _startup_load(self):
         await self.bot.wait_until_ready()
         stored = await self.config.repeats()
-        # recreate tasks from stored config
         for task_id, data in stored.items():
-            # minimal validation
-            group = data.get("group")
-            channel_id = data.get("channel_id")
-            interval = data.get("interval")
-            if not group or not channel_id or not interval:
+            try:
+                # basic validation
+                group = data.get("group")
+                interval = data.get("interval")
+                channel_id = data.get("channel_id")
+                if not group or not interval or not channel_id:
+                    continue
+                # try to resolve channel; if missing, still spawn loop (it will try fetch)
+                loop_task = asyncio.create_task(self._repeat_loop(task_id, data))
+                self.running_tasks[task_id] = loop_task
+            except Exception:
+                # don't allow startup to fail for one entry
                 continue
-            channel = self.bot.get_channel(channel_id)
-            # only restore tasks whose channel is resolvable (skip otherwise)
-            if channel is None:
-                continue
-            # create asyncio task
-            loop_task = asyncio.create_task(self._repeat_loop(task_id, data))
-            self.running_tasks[task_id] = loop_task
 
     # ============================================================
-    # RUN BOT COMMAND - robust for both direct ctx and scheduled runs
+    # RUN BOT COMMAND - scheduled execution (no non-serializable saved)
     # ============================================================
-    async def run_bot_command(
+    async def run_bot_command_scheduled(
         self,
-        ctx,
         command_string: str,
-        *,
-        channel: discord.abc.Messageable = None,
-        state=None,
-        author_obj=None,
-        prefix=None,
+        channel: discord.abc.Messageable,
+        author_id: int,
+        prefix: str,
     ):
         """
-        Execute a command string as if typed by a user.
-        Two modes:
-         - direct mode: pass a real ctx (ctx is not None). Uses ctx.message._state etc.
-         - scheduled mode: pass channel, state, author_obj, prefix; ctx should be None.
+        Execute a bot command string in the given channel using a rebuilt Message
+        with the bot's live connection state (self.bot._connection). This function
+        is used by scheduled tasks (no ctx available).
         """
-
-        # Direct/invoked path: use the real ctx provided
-        if ctx is not None:
-            try:
-                # Create a fake message using real ctx.message._state to ensure compatibility
-                state = ctx.message._state
-                fake_data = {
-                    "id": ctx.message.id,
-                    "type": 0,
-                    "content": (ctx.prefix or "") + command_string,
-                    "channel_id": ctx.channel.id,
-                    "author": {
-                        "id": ctx.author.id,
-                        "username": ctx.author.name,
-                        "avatar": ctx.author.avatar.key if ctx.author.avatar else None,
-                        "discriminator": ctx.author.discriminator,
-                        "public_flags": (
-                            ctx.author.public_flags.value
-                            if hasattr(ctx.author, "public_flags")
-                            else 0
-                        ),
-                    },
-                    "attachments": [],
-                    "embeds": [],
-                    "mentions": [],
-                    "mention_roles": [],
-                    "pinned": False,
-                    "tts": False,
-                    "timestamp": ctx.message.created_at.isoformat(),
-                }
-                fake_message = discord.Message(
-                    state=state, channel=ctx.channel, data=fake_data
-                )
-                new_ctx = await self.bot.get_context(fake_message, cls=type(ctx))
-                await self.bot.invoke(new_ctx)
-                return
-            except Exception:
-                # fallback - try basic context invoke path
-                try:
-                    fake_msg = ctx.message
-                    fake_msg.content = (ctx.prefix or "") + command_string
-                    new_ctx = await self.bot.get_context(fake_msg, cls=type(ctx))
-                    await self.bot.invoke(new_ctx)
-                    return
-                except Exception:
-                    # swallow, will raise below if completely failing
-                    pass
-
-        # Scheduled path: build a message using the provided state / channel / author
-        if state is None or channel is None or author_obj is None or prefix is None:
-            raise RuntimeError(
-                "Missing scheduling context when executing scheduled command."
+        # Resolve author object (best-effort)
+        author = None
+        try:
+            author = self.bot.get_user(author_id) or await self.bot.fetch_user(
+                author_id
             )
+        except Exception:
+            author = None
 
-        # Ensure author_obj is a full User object
-        if isinstance(author_obj, int):
-            try:
-                author = await self.bot.fetch_user(author_obj)
-            except Exception:
-                author = None
-        else:
-            author = author_obj
-
+        # Build author data for message payload (not stored in config)
         author_data = {
-            "id": author.id if author else 0,
+            "id": author.id if author else author_id,
             "username": getattr(author, "name", "Unknown") if author else "Unknown",
             "avatar": (
-                author.avatar.key
+                getattr(author, "avatar", None).key
                 if (author and getattr(author, "avatar", None))
                 else None
             ),
@@ -176,6 +118,9 @@ class TaskPacket(commands.Cog):
                 else 0
             ),
         }
+
+        # Use the bot's live connection state (do NOT store this)
+        state = getattr(self.bot, "_connection", None)
 
         fake_data = {
             "id": int(time.time() * 1000) & 0xFFFFFFFF,
@@ -194,13 +139,12 @@ class TaskPacket(commands.Cog):
 
         try:
             fake_message = discord.Message(state=state, channel=channel, data=fake_data)
-            # Build a Context and invoke
             new_ctx = await self.bot.get_context(fake_message, cls=commands.Context)
             await self.bot.invoke(new_ctx)
         except Exception as exc:
-            # If building Message or invoking fails, try a minimal fallback:
+            # fallback minimal message-like object for get_context if Message fails
             try:
-                # minimal fallback: create a simple object that resembles a message for get_context
+
                 class SimpleMsg:
                     pass
 
@@ -213,34 +157,45 @@ class TaskPacket(commands.Cog):
                 sm.created_at = discord.utils.utcnow()
                 new_ctx = await self.bot.get_context(sm, cls=commands.Context)
                 await self.bot.invoke(new_ctx)
-            except Exception:
-                # Ultimately, if invocation fails, raise so callers can log or handle
-                raise exc
+            except Exception as exc2:
+                # If both methods fail, raise so the caller can log
+                raise exc2
+
+    # ============================================================
+    # RUN BOT COMMAND - direct ctx path (used by tp_run)
+    # ============================================================
+    async def run_bot_command_direct(self, ctx, command_string: str):
+        """
+        Execute command using a real ctx (when running .tp run).
+        This keeps identical behavior to a user typing the command.
+        """
+        # mutate message content temporarily and restore after
+        orig = ctx.message.content
+        try:
+            ctx.message.content = (ctx.prefix or "") + command_string
+            new_ctx = await self.bot.get_context(ctx.message, cls=type(ctx))
+            await self.bot.invoke(new_ctx)
+        finally:
+            ctx.message.content = orig
 
     # ============================================================
     # BACKGROUND LOOP FOR EACH TASK
     # ============================================================
     async def _repeat_loop(self, task_id: str, data: dict):
         """
-        Loop that runs commands for a given stored task_id.
-        Uses stored state + channel_id + author_id + prefix saved in config entry.
+        Loop running each scheduled task. Data is the primitive-only dict from config.
         """
-
         group = data["group"]
         interval = data["interval"]
         channel_id = data["channel_id"]
-        state_repr = data.get("state_repr")  # stored at creation (ctx.message._state)
         author_id = data.get("author_id")
         prefix = data.get("prefix", "")
-
-        # Attempt to resolve a state object for Message construction
-        state = state_repr if state_repr else getattr(self.bot, "_connection", None)
 
         while True:
             try:
                 groups = await self.config.groups()
                 if group not in groups:
-                    # group removed -> stop loop and remove from config
+                    # group removed → cleanup config and stop
                     try:
                         await self.config.repeats.clear_raw(task_id)
                     except Exception:
@@ -249,45 +204,33 @@ class TaskPacket(commands.Cog):
 
                 cmds = groups[group].copy()
 
-                # resolve channel and author at runtime
+                # resolve channel fresh each iteration
                 channel = self.bot.get_channel(channel_id)
                 if channel is None:
-                    # try fetching if not found in cache
+                    # try fetch
                     try:
                         channel = await self.bot.fetch_channel(channel_id)
                     except Exception:
-                        # cannot resolve channel: skip this iteration, update next_run and sleep
+                        # can't resolve channel, skip this cycle but update next_run
                         data["next_run"] = time.time() + interval
                         await self.config.repeats.set_raw(task_id, value=data)
                         await asyncio.sleep(interval)
                         continue
 
-                author = None
-                if author_id:
-                    try:
-                        author = self.bot.get_user(
-                            author_id
-                        ) or await self.bot.fetch_user(author_id)
-                    except Exception:
-                        author = None
-
+                # run each command string as a bot command using scheduled runner
                 for cmd in cmds:
                     try:
-                        await self.run_bot_command(
-                            None,
-                            cmd,
-                            channel=channel,
-                            state=state,
-                            author_obj=author,
-                            prefix=prefix,
+                        await self.run_bot_command_scheduled(
+                            cmd, channel, author_id, prefix
                         )
                     except Exception as exc:
-                        # Attempt to log into the channel to indicate error
+                        # try report into the channel
                         try:
                             await channel.send(f"❌ Error executing `{cmd}`:\n`{exc}`")
                         except Exception:
                             pass
-                # schedule next run
+
+                # update next_run and persist minimal primitives
                 data["next_run"] = time.time() + interval
                 await self.config.repeats.set_raw(task_id, value=data)
 
@@ -295,48 +238,11 @@ class TaskPacket(commands.Cog):
             except asyncio.CancelledError:
                 return
             except Exception:
-                # if loop experiences an unexpected error, wait briefly and continue
+                # resilience: wait a bit and continue
                 try:
                     await asyncio.sleep(max(1, interval))
                 except asyncio.CancelledError:
                     return
-
-    # ============================================================
-    # Helper to capture state and author when scheduling
-    # ============================================================
-    def _capture_state_and_prefix(self, ctx):
-        """
-        Returns a serializable representation of the state and prefix.
-        We can't serialize the full state object; we'll store the state's object reference
-        (non-serializable) for live reloads, but also keep fallback to bot._connection.
-        """
-        # Try to return the actual state object (works in-memory)
-        state = getattr(ctx.message, "_state", None)
-        return state
-
-    # ============================================================
-    # Construct a minimal fake ctx used by earlier code paths (kept for compatibility)
-    # ============================================================
-    def _fake_ctx(self):
-        """Construct a minimal fake context-like object for legacy calls."""
-
-        class Dummy:
-            pass
-
-        d = Dummy()
-        # Use the bot's connection as fallback
-        d.message = type(
-            "FakeMsg",
-            (),
-            {
-                "_state": getattr(self.bot, "_connection", None),
-                "created_at": discord.utils.utcnow(),
-            },
-        )
-        d.prefix = "."
-        d.author = self.bot.user
-        d.channel = None
-        return d
 
     # ============================================================
     # COMMAND GROUP
@@ -344,7 +250,8 @@ class TaskPacket(commands.Cog):
     @commands.group(name="taskpacket", aliases=["tp"])
     @checks.is_owner()
     async def taskpacket(self, ctx):
-        pass
+        if ctx.invoked_subcommand is None:
+            return
 
     # ============================================================
     # LIST GROUPS
@@ -444,7 +351,7 @@ class TaskPacket(commands.Cog):
     # ============================================================
     # RUN GROUP ONCE
     # ============================================================
-    @taskpacket.command(name="run")
+    @taskpacket.command(name="run", aliases=["exec"])
     async def tp_run(self, ctx, group: str):
         groups = await self.config.groups()
         if group not in groups:
@@ -456,8 +363,8 @@ class TaskPacket(commands.Cog):
 
         for cmd in groups[group]:
             try:
-                # use the real ctx so run_bot_command can use its state safely
-                await self.run_bot_command(ctx, cmd, channel=ctx.channel)
+                # use real ctx for direct run
+                await self.run_bot_command_direct(ctx, cmd)
             except Exception as e:
                 await ctx.send(f"❌ Error executing `{cmd}`:\n`{e}`")
 
@@ -477,11 +384,7 @@ class TaskPacket(commands.Cog):
         except ValueError as e:
             return await ctx.send(f"❌ {e}")
 
-        # prepare storage entry (capture live state/prefix/author)
-        state_repr = self._capture_state_and_prefix(ctx)
-        author_id = ctx.author.id
-        prefix = ctx.prefix
-
+        # prepare minimal primitive-only entry
         task_id = str(int(time.time() * 1000))
         entry = {
             "group": group,
@@ -489,15 +392,14 @@ class TaskPacket(commands.Cog):
             "interval_raw": interval,
             "channel_id": ctx.channel.id,
             "next_run": time.time() + seconds,
-            "state_repr": state_repr,
-            "author_id": author_id,
-            "prefix": prefix,
+            "author_id": ctx.author.id,
+            "prefix": ctx.prefix or "",
         }
 
-        # store persistently
+        # persist minimal primitives only
         await self.config.repeats.set_raw(task_id, value=entry)
 
-        # spawn loop and track
+        # spawn loop and track in-memory
         loop_task = asyncio.create_task(self._repeat_loop(task_id, entry))
         self.running_tasks[task_id] = loop_task
 
@@ -566,9 +468,9 @@ class TaskPacket(commands.Cog):
         tasks = []
         for task in asyncio.all_tasks():
             if (
-                "repeat_loop" in str(task)
-                or "_repeat_loop" in str(task)
-                or "run_bot_command" in str(task)
+                "_repeat_loop" in str(task)
+                or "run_bot_command_scheduled" in str(task)
+                or "run_bot_command_direct" in str(task)
             ):
                 tasks.append(str(task))
 
