@@ -369,9 +369,9 @@ class TaskPacket(commands.Cog):
         await self.config.repeats.clear_raw(task_id)
 
         await ctx.send(f"⏹ Stopped scheduled repeat at index **{index}**.")
-        
+
     @commands.is_owner()
-    @commands.command()
+    @taskpacket.command(name="checkghost")
     async def tp_checkghost(self, ctx):
         tasks = []
         for task in asyncio.all_tasks():
@@ -382,7 +382,6 @@ class TaskPacket(commands.Cog):
             await ctx.send("✅ No ghost repeat tasks exist.")
         else:
             await ctx.send("⚠️ Ghost tasks found:\n```\n" + "\n".join(tasks) + "\n```")
-
 
     # ============================================================
     # COG UNLOAD
