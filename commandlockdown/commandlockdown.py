@@ -5,41 +5,34 @@ from typing import List
 
 
 class CommandLockdown(commands.Cog):
-    """
-    CommandLockdown with:
-    - Role/User allow lists (full or specific cogs/commands)
-    - Global disable of cogs / commands (owner only)
-    """
+    """Advanced Command Lockdown"""
 
     def __init__(self, bot: Red):
-        super().__init__()
-        self.bot: Red = bot
-        self.config: Config = Config.get_conf(
+        self.bot = bot
+        self.config = Config.get_conf(
             self, identifier=84738293048, force_registration=True
         )
+
         self.config.register_guild(
             lockdown_enabled=False,
             trusted_roles={},
             trusted_users={},
             disabled_items=[],
+            global_trusted_users=[],
+            global_trusted_roles={},
+            supertrusted_users=[],
         )
 
-        self._original_checks: List = []
-        try:
-            existing = list(getattr(self.bot, "_checks", []))
-        except Exception:
-            existing = []
-
-        for chk in existing:
+        self._original_checks = list(getattr(self.bot, "_checks", []))
+        for chk in self._original_checks:
             try:
                 self.bot.remove_check(chk)
-                self._original_checks.append(chk)
             except Exception:
                 pass
 
         self.bot.add_check(self._global_lockdown_check)
 
-    def cog_unload(self) -> None:
+    def cog_unload(self):
         try:
             self.bot.remove_check(self._global_lockdown_check)
         except Exception:
@@ -50,182 +43,105 @@ class CommandLockdown(commands.Cog):
             except Exception:
                 pass
 
-    # ---------- RESOLVERS ----------
-
-    async def _resolve_role(self, ctx, role_input: str):
-        if role_input.startswith("<@&") and role_input.endswith(">"):
-            inner = role_input[3:-1]
-            if inner.isdigit():
-                return ctx.guild.get_role(int(inner))
-        if role_input.isdigit():
-            return ctx.guild.get_role(int(role_input))
-        for r in ctx.guild.roles:
-            if r.name.lower() == role_input.lower():
-                return r
-        return None
-
-    async def _resolve_member(self, ctx, member_input: str):
-        if member_input.startswith("<@") and member_input.endswith(">"):
-            inner = member_input.strip("<@!>")
-            if inner.isdigit():
-                return ctx.guild.get_member(int(inner))
-        if member_input.isdigit():
-            return ctx.guild.get_member(int(member_input))
-        for m in ctx.guild.members:
-            if (
-                m.name.lower() == member_input.lower()
-                or f"{m.name.lower()}#{m.discriminator}" == member_input.lower()
-            ):
-                return m
-        return None
-
-    # ---------- MATCHING ----------
-
-    async def _is_match(self, items: List[str], ctx):
-        cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
-        cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
-        full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else None
-
-        items_lower = {i.lower() for i in items}
-        return (cog_name and cog_name in items_lower) or (
-            full_cmd and full_cmd in items_lower
-        )
-
-    # ---------- VALIDATION ----------
+    # ---------------- VALIDATION ----------------
 
     def _validate_item(self, item: str) -> bool:
-        """
-        Validates whether a cog or cog.command exists (Red-safe).
-        """
         if "." not in item:
-            # Validate cog (case-insensitive)
             return any(
                 cog.qualified_name.lower() == item.lower()
                 for cog in self.bot.cogs.values()
             )
+        return self.bot.get_command(item.lower()) is not None
 
-        # Validate command (global lookup, supports subcommands)
-        return self.bot.get_command(item) is not None
-
-
-    # ---------- GLOBAL CHECK ----------
+    # ---------------- GLOBAL CHECK ----------------
 
     async def _global_lockdown_check(self, ctx):
         if ctx.guild is None:
             return True
 
+        gid = ctx.guild.id
+        data = await self.config.guild(ctx.guild).all()
+
+        # OWNER / SUPERTRUST
         if ctx.author.id in getattr(self.bot, "owner_ids", set()):
             return True
 
-        data = await self.config.guild(ctx.guild).all()
-
-        # ===== GLOBAL DISABLE =====
-        disabled = set(data.get("disabled_items", []))
-        blocked_by_disable = False
-
-        if disabled and ctx.command:
-            cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
-            cmd_name = ctx.command.qualified_name.lower() if ctx.command else None
-            full_cmd = f"{cog_name}.{cmd_name}" if cog_name and cmd_name else None
-
-            if (cog_name and cog_name in disabled) or (
-                full_cmd and full_cmd in disabled
-            ):
-                blocked_by_disable = True
-
-        if not data["lockdown_enabled"] and not blocked_by_disable:
+        if ctx.author.id in data["supertrusted_users"]:
             return True
 
-        tr_roles, tr_users = data["trusted_roles"], data["trusted_users"]
-        user_roles = {str(r.id) for r in ctx.author.roles}
+        # COMMAND INFO
+        if not ctx.command:
+            return True
 
-        # Trusted users
-        if str(ctx.author.id) in tr_users:
-            info = tr_users[str(ctx.author.id)]
-            if info["access"] == "all" or await self._is_match(info["cogs"], ctx):
+        cog_name = ctx.cog.qualified_name.lower() if ctx.cog else None
+        cmd_name = ctx.command.qualified_name.lower()
+        full_cmd = f"{cog_name}.{cmd_name}" if cog_name else None
+
+        # GLOBAL DISABLE
+        blocked = False
+        for item in data["disabled_items"]:
+            if item == cog_name or item == full_cmd:
+                blocked = True
+                break
+
+        # GLOBAL TRUST BYPASS
+        if blocked:
+            if ctx.author.id in data["global_trusted_users"]:
                 return True
 
-        # Trusted roles
-        allowed_items = set()
-        allow_all = False
-        for rid, info in tr_roles.items():
-            if rid in user_roles:
+            for r in ctx.author.roles:
+                info = data["global_trusted_roles"].get(str(r.id))
+                if info:
+                    if info == "all":
+                        return True
+                    if item in info:
+                        return True
+            return False
+
+        # SERVER LOCKDOWN
+        if not data["lockdown_enabled"]:
+            return True
+
+        # SERVER TRUST
+        if str(ctx.author.id) in data["trusted_users"]:
+            info = data["trusted_users"][str(ctx.author.id)]
+            if info["access"] == "all":
+                return True
+            if full_cmd in info["cogs"] or cog_name in info["cogs"]:
+                return True
+
+        for r in ctx.author.roles:
+            info = data["trusted_roles"].get(str(r.id))
+            if info:
                 if info["access"] == "all":
-                    allow_all = True
-                    break
-                allowed_items.update(info["cogs"])
+                    return True
+                if full_cmd in info["cogs"] or cog_name in info["cogs"]:
+                    return True
 
-        allowed = allow_all or await self._is_match(list(allowed_items), ctx)
+        return False
 
-        if blocked_by_disable:
-            return allowed
-
-        return allowed
-
-    # ---------- COMMANDS ----------
+    # ---------------- COMMAND GROUP ----------------
 
     @commands.group(name="cl", invoke_without_command=True)
     @checks.is_owner()
     async def cl(self, ctx):
-        """Command Lockdown management."""
         await ctx.send_help()
 
+    # ---------------- LOCKDOWN ----------------
+
     @cl.command()
-    @checks.is_owner()
     async def toggle(self, ctx):
-        current = await self.config.guild(ctx.guild).lockdown_enabled()
-        await self.config.guild(ctx.guild).lockdown_enabled.set(not current)
-        await ctx.send(f"🔒 Lockdown is now {'ON' if not current else 'OFF'}.")
+        v = await self.config.guild(ctx.guild).lockdown_enabled()
+        await self.config.guild(ctx.guild).lockdown_enabled.set(not v)
+        await ctx.send(f"🔒 Lockdown {'enabled' if not v else 'disabled'}")
 
-    # ---------- TRUST ----------
+    # ---------------- GLOBAL DISABLE ----------------
 
-    @cl.command()
-    @checks.is_owner()
-    async def trust(self, ctx, target: str, *items: str):
-        obj = await self._resolve_role(ctx, target) or await self._resolve_member(
-            ctx, target
-        )
-        if not obj:
-            return await ctx.send("❌ Role or user not found.")
-
-        items = [i.lower() for i in items]
-
-        for i in items:
-            if i != "all" and not self._validate_item(i):
-                return await ctx.send(f"❌ `{i}` is not a valid cog or command.")
-
-        if isinstance(obj, discord.Member):
-            tu = await self.config.guild(ctx.guild).trusted_users()
-            current = tu.get(str(obj.id), {"access": "cogs", "cogs": []})
-            if not items or items[0] == "all":
-                current = {"access": "all", "cogs": []}
-            else:
-                if current.get("access") != "all":
-                    current["cogs"] = list(set(current.get("cogs", [])) | set(items))
-            tu[str(obj.id)] = current
-            await self.config.guild(ctx.guild).trusted_users.set(tu)
-        else:
-            tr = await self.config.guild(ctx.guild).trusted_roles()
-            current = tr.get(str(obj.id), {"access": "cogs", "cogs": []})
-            if not items or items[0] == "all":
-                current = {"access": "all", "cogs": []}
-            else:
-                if current.get("access") != "all":
-                    current["cogs"] = list(set(current.get("cogs", [])) | set(items))
-            tr[str(obj.id)] = current
-            await self.config.guild(ctx.guild).trusted_roles.set(tr)
-
-        await ctx.send(f"✅ {obj} trusted for: {', '.join(items) if items else 'All'}")
-
-    # ---------- GLOBAL DISABLE ----------
-
-    @cl.command()
-    @checks.is_owner()
-    async def disable(self, ctx, item: str):
+    @cl.command(name="globaldisable", aliases=["gdisable"])
+    async def globaldisable(self, ctx, item: str):
         item = item.lower()
-
         if not self._validate_item(item):
-            return await ctx.send("❌ That cog or command does not exist.")
+            return await ctx.send("❌ Invalid cog or command.")
 
         data = await self.config.guild(ctx.guild).disabled_items()
         if item in data:
@@ -233,46 +149,73 @@ class CommandLockdown(commands.Cog):
 
         data.append(item)
         await self.config.guild(ctx.guild).disabled_items.set(data)
-        await ctx.send(f"🚫 Disabled `{item}` for everyone except trusted users.")
+        await ctx.send(f"🚫 Globally disabled `{item}`")
 
-    @cl.command()
-    @checks.is_owner()
-    async def enable(self, ctx, item: str):
+    @cl.command(name="globalenable", aliases=["genable"])
+    async def globalenable(self, ctx, item: str):
         item = item.lower()
         data = await self.config.guild(ctx.guild).disabled_items()
-
         if item not in data:
-            return await ctx.send("❌ That item is not disabled.")
+            return await ctx.send("❌ Not disabled.")
 
         data.remove(item)
         await self.config.guild(ctx.guild).disabled_items.set(data)
-        await ctx.send(f"✅ Re-enabled `{item}`.")
-
-    # ---------- STATUS ----------
+        await ctx.send(f"✅ Globally enabled `{item}`")
 
     @cl.command()
-    @checks.is_owner()
-    async def status(self, ctx):
-        data = await self.config.guild(ctx.guild).all()
-
-        embed = discord.Embed(
-            title="Command Lockdown Status",
-            description=f"Lockdown Active: {'✅ Yes' if data['lockdown_enabled'] else '❌ No'}",
-            color=(
-                discord.Color.red()
-                if data["lockdown_enabled"]
-                else discord.Color.green()
-            ),
+    async def globallist(self, ctx):
+        data = await self.config.guild(ctx.guild).disabled_items()
+        if not data:
+            return await ctx.send("No globally disabled commands.")
+        await ctx.send(
+            "🚫 **Globally Disabled:**\n" + "\n".join(f"`{i}`" for i in data)
         )
 
-        disabled = data.get("disabled_items", [])
-        embed.add_field(
-            name="Globally Disabled",
-            value="None" if not disabled else "\n".join(f"`{i}`" for i in disabled),
-            inline=False,
-        )
+    # ---------------- GLOBAL TRUST ----------------
 
-        await ctx.send(embed=embed)
+    @cl.command()
+    async def globaltrust(self, ctx, member: discord.Member, *items):
+        data = await self.config.guild(ctx.guild).global_trusted_users()
+        if member.id not in data:
+            data.append(member.id)
+            await self.config.guild(ctx.guild).global_trusted_users.set(data)
+        await ctx.send(f"✅ {member} can bypass global disables")
+
+    @cl.command()
+    async def globaluntrust(self, ctx, member: discord.Member):
+        data = await self.config.guild(ctx.guild).global_trusted_users()
+        if member.id in data:
+            data.remove(member.id)
+            await self.config.guild(ctx.guild).global_trusted_users.set(data)
+        await ctx.send(f"❌ Removed global trust from {member}")
+
+    # ---------------- SUPERTRUST ----------------
+
+    @cl.command()
+    async def supertrust(self, ctx, member: discord.Member):
+        data = await self.config.guild(ctx.guild).supertrusted_users()
+        if member.id not in data:
+            data.append(member.id)
+            await self.config.guild(ctx.guild).supertrusted_users.set(data)
+        await ctx.send(f"⭐ {member} is now SUPERTRUSTED")
+
+    @cl.command()
+    async def superuntrust(self, ctx, member: discord.Member):
+        data = await self.config.guild(ctx.guild).supertrusted_users()
+        if member.id in data:
+            data.remove(member.id)
+            await self.config.guild(ctx.guild).supertrusted_users.set(data)
+        await ctx.send(f"❌ Removed SUPERTRUST from {member}")
+
+    @cl.command()
+    async def superlist(self, ctx):
+        data = await self.config.guild(ctx.guild).supertrusted_users()
+        if not data:
+            return await ctx.send("No supertrusted users.")
+        users = [ctx.guild.get_member(i) for i in data if ctx.guild.get_member(i)]
+        await ctx.send(
+            "⭐ **Supertrusted Users:**\n" + "\n".join(str(u) for u in users)
+        )
 
 
 async def setup(bot: Red):
