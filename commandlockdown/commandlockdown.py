@@ -95,19 +95,18 @@ class CommandLockdown(commands.Cog):
 
     def _validate_item(self, item: str) -> bool:
         """
-        Validates whether a cog or cog.command exists.
+        Validates whether a cog or cog.command exists (Red-safe).
         """
-        item = item.lower()
-
         if "." not in item:
-            return self.bot.get_cog(item) is not None
+            # Validate cog (case-insensitive)
+            return any(
+                cog.qualified_name.lower() == item.lower()
+                for cog in self.bot.cogs.values()
+            )
 
-        cog_name, cmd_name = item.split(".", 1)
-        cog = self.bot.get_cog(cog_name)
-        if not cog:
-            return False
+        # Validate command (global lookup, supports subcommands)
+        return self.bot.get_command(item) is not None
 
-        return cog.get_command(cmd_name) is not None
 
     # ---------- GLOBAL CHECK ----------
 
