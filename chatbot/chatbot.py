@@ -1,5 +1,5 @@
 from redbot.core import commands
-import dialogflow_v2 as dialogflow
+from google.cloud import dialogflow_v2 as dialogflow
 import uuid
 import asyncio
 
