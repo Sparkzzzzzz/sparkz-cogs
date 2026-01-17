@@ -1,3 +1,7 @@
+# mcstats.py
+# Redbot Cog: MCStats (Advanced)
+# Uses mcstatus.io API + direct Minecraft Query protocol to fetch player list even when API can't
+
 import aiohttp
 import discord
 import asyncio
@@ -28,8 +32,8 @@ class MCStats(commands.Cog):
                 raise RuntimeError(f"API error {resp.status}: {text}")
             return await resp.json()
 
-    async def query_players(self, host: str, port: int = 25565):
-        """Direct Minecraft Query protocol to fetch full player list"""
+    def query_players(self, host: str, port: int = 25565):
+        """Direct Minecraft Query protocol to fetch full player list (blocking)"""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(3)
@@ -86,7 +90,7 @@ class MCStats(commands.Cog):
         software = data.get("software", "Unknown")
         hostname = data.get("hostname", ip)
         ipaddr = data.get("ip_address", ip)
-        port = data.get("port", 25565)
+        port = int(data.get("port", 25565))
 
         embed = discord.Embed(
             title=f"MCStats — {hostname}", color=discord.Color.green()
@@ -105,8 +109,9 @@ class MCStats(commands.Cog):
         # Deep scan player list (Java only)
         deep_players = []
         if edition == "java":
-            deep_players = await asyncio.get_event_loop().run_in_executor(
-                None, self.query_players, ipaddr, int(port)
+            loop = asyncio.get_running_loop()
+            deep_players = await loop.run_in_executor(
+                None, self.query_players, ipaddr, port
             )
 
         if deep_players:
