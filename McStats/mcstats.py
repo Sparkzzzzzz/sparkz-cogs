@@ -1,3 +1,8 @@
+# mcstats.py
+# Redbot Cog: MCStats
+# Uses mcstatus.io API to fetch Minecraft server info (Java & Bedrock)
+# Place this file in a folder named `mcstats` with an __init__.py and info.json as needed.
+
 import aiohttp
 import discord
 from redbot.core import commands, checks
@@ -84,13 +89,28 @@ class MCStats(commands.Cog):
                 name="Sample Online Players",
                 value="(Not available — server may have query disabled)",
                 inline=False,
-            )
+            )  # mcstatus.io returns the server icon as a data: URI, which Discord cannot use as a thumbnail URL.
+        # So we intentionally skip setting the thumbnail to avoid 400 Bad Request errors.
+        # (If you want, I can add code to upload the icon as a file and embed it.)
 
+        # Handle server icon: upload as attachment so Discord can display it
         icon = data.get("icon")
-        if icon and isinstance(icon, str) and icon.startswith("data:image"):
-            embed.set_thumbnail(url=icon)
+        file = None
+        if isinstance(icon, str) and icon.startswith("data:image"):
+            try:
+                header, b64 = icon.split(",", 1)
+                ext = header.split("/")[1].split(";")[0]
+                import base64, io
 
-        await ctx.send(embed=embed)
+                raw = base64.b64decode(b64)
+                buf = io.BytesIO(raw)
+                filename = f"server_icon.{ext}"
+                file = discord.File(buf, filename=filename)
+                embed.set_thumbnail(url=f"attachment://{filename}")
+            except Exception:
+                pass
+
+        await ctx.send(embed=embed, file=file)
 
 
 async def setup(bot: Red):
