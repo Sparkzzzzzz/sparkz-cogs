@@ -10,13 +10,14 @@ HEX_REGEX = re.compile(r"^#?[0-9a-fA-F]{6}$")
 # VIEW
 # =========================================================
 
+
 class RRButton(discord.ui.Button):
     def __init__(self, role_id: int, label: str, emoji: str):
         super().__init__(
             label=label,
             emoji=emoji,
             style=discord.ButtonStyle.secondary,
-            custom_id=f"rr_btn_{role_id}"
+            custom_id=f"rr_btn_{role_id}",
         )
         self.role_id = role_id
 
@@ -50,6 +51,7 @@ class RRView(discord.ui.View):
 # =========================================================
 # COG
 # =========================================================
+
 
 class ReactionRoles(commands.Cog):
     """Stable Reaction Roles v2"""
@@ -130,9 +132,7 @@ class ReactionRoles(commands.Cog):
                 return await ctx.send("Setup cancelled.")
 
             if "|" in msg.content:
-                title, description = [
-                    x.strip() for x in msg.content.split("|", 1)
-                ]
+                title, description = [x.strip() for x in msg.content.split("|", 1)]
                 break
 
             await ctx.send("Invalid format. Use `Title | Description`.")
@@ -218,10 +218,7 @@ class ReactionRoles(commands.Cog):
             emoji = parts[0]
             role = msg.role_mentions[0]
 
-            roles[str(role.id)] = {
-                "emoji": emoji,
-                "label": role.name
-            }
+            roles[str(role.id)] = {"emoji": emoji, "label": role.name}
 
             await ctx.send(f"Linked {emoji} → {role.name}")
 
@@ -229,8 +226,7 @@ class ReactionRoles(commands.Cog):
 
         if "{roles}" in description:
             role_lines = "\n".join(
-                f"{data['emoji']} <@&{role_id}>"
-                for role_id, data in roles.items()
+                f"{data['emoji']} <@&{role_id}>" for role_id, data in roles.items()
             )
             description = description.replace("{roles}", role_lines)
 
@@ -247,10 +243,7 @@ class ReactionRoles(commands.Cog):
                 await message.add_reaction(data["emoji"])
 
         if mode in ["button", "dropdown"]:
-            rr_data = {
-                "roles": roles,
-                "mode": mode
-            }
+            rr_data = {"roles": roles, "mode": mode}
 
             view = await self.build_view(rr_data)
             await message.edit(view=view)
@@ -264,7 +257,7 @@ class ReactionRoles(commands.Cog):
                 "description": description,
                 "color": color.value,
                 "mode": mode,
-                "roles": roles
+                "roles": roles,
             }
 
         await ctx.send(f"Panel created in {channel.mention}.")
@@ -280,18 +273,14 @@ class ReactionRoles(commands.Cog):
             for role_id, data in rr_data["roles"].items():
                 view.add_item(
                     RRButton(
-                        role_id=int(role_id),
-                        label=data["label"],
-                        emoji=data["emoji"]
+                        role_id=int(role_id), label=data["label"], emoji=data["emoji"]
                     )
                 )
 
         elif rr_data["mode"] == "dropdown":
             options = [
                 discord.SelectOption(
-                    label=data["label"],
-                    emoji=data["emoji"],
-                    value=role_id
+                    label=data["label"], emoji=data["emoji"], value=role_id
                 )
                 for role_id, data in rr_data["roles"].items()
             ]
@@ -300,7 +289,7 @@ class ReactionRoles(commands.Cog):
                 placeholder="Select your role",
                 options=options,
                 min_values=1,
-                max_values=1
+                max_values=1,
             )
 
             async def select_callback(interaction):
