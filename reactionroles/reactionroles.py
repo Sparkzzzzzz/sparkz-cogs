@@ -354,6 +354,20 @@ class ReactionRoles(commands.Cog):
         async with self.config.guild(ctx.guild).panels() as panels:
             if str(message_id) not in panels:
                 return await ctx.send("Panel not found.")
+
+            panel = panels[str(message_id)]
+            channel = ctx.guild.get_channel(panel["channel"])
+
+            if channel:
+                try:
+                    msg = await channel.fetch_message(message_id)
+                    await msg.delete()
+                except discord.NotFound:
+                    pass
+                except discord.Forbidden:
+                    return await ctx.send("I cannot delete that message.")
+
             del panels[str(message_id)]
 
-        await ctx.send("Panel deleted.")
+        await ctx.send("Panel deleted and message removed.")
+
