@@ -7,57 +7,6 @@ HEX_REGEX = re.compile(r"^#?[0-9a-fA-F]{6}$")
 
 
 # =========================================================
-# BUTTON
-# =========================================================
-
-
-class RRButton(discord.ui.Button):
-    def __init__(self, guild_id: int, role_id: int, label: str, emoji: str):
-        super().__init__(
-            label=label,
-            emoji=emoji,
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"rr_btn_{guild_id}_{role_id}",
-        )
-        self.role_id = role_id
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-
-        guild = interaction.guild
-        member = interaction.user
-        role = guild.get_role(self.role_id)
-
-        if not role:
-            return await interaction.followup.send("Role not found.", ephemeral=True)
-
-        if role >= guild.me.top_role:
-            return await interaction.followup.send(
-                "I cannot manage that role (it is above me).",
-                ephemeral=True,
-            )
-
-        try:
-            if role in member.roles:
-                await member.remove_roles(role)
-                await interaction.followup.send(
-                    f"Removed {role.name}",
-                    ephemeral=True,
-                )
-            else:
-                await member.add_roles(role)
-                await interaction.followup.send(
-                    f"Added {role.name}",
-                    ephemeral=True,
-                )
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "Missing Manage Roles permission.",
-                ephemeral=True,
-            )
-
-
-# =========================================================
 # VIEW
 # =========================================================
 
@@ -65,6 +14,75 @@ class RRButton(discord.ui.Button):
 class RRView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+
+
+# =========================================================
+# BUTTON
+# =========================================================
+
+
+class RRButton(discord.ui.Button):
+    def __init__(
+        self, guild_id: int, message_id: int, role_id: int, label: str, emoji: str
+    ):
+        super().__init__(
+            label=label,
+            emoji=emoji,
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"rr_btn_{guild_id}_{message_id}_{role_id}",
+        )
+        self.guild_id = guild_id
+        self.message_id = message_id
+        self.role_id = role_id
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("ReactionRoles")
+        if not cog:
+            return
+
+        panel = await cog.get_panel(self.guild_id, self.message_id)
+        if not panel:
+            return await interaction.response.send_message(
+                "Panel not found.", ephemeral=True
+            )
+
+        guild = interaction.guild
+        member = interaction.user
+        role = guild.get_role(self.role_id)
+
+        if not role:
+            return await interaction.response.send_message(
+                "Role not found.", ephemeral=True
+            )
+
+        if role >= guild.me.top_role:
+            return await interaction.response.send_message(
+                "I cannot manage that role (it is above me).",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # UNIQUE MODE
+            if panel.get("unique"):
+                for rid in panel["roles"]:
+                    r = guild.get_role(int(rid))
+                    if r in member.roles and r.id != role.id:
+                        await member.remove_roles(r)
+
+            if role in member.roles:
+                await member.remove_roles(role)
+                await interaction.followup.send(f"Removed {role.name}", ephemeral=True)
+            else:
+                await member.add_roles(role)
+                await interaction.followup.send(f"Added {role.name}", ephemeral=True)
+
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "Missing Manage Roles permission.",
+                ephemeral=True,
+            )
 
 
 # =========================================================
@@ -90,8 +108,12 @@ class ReactionRoles(commands.Cog):
 
             for message_id, panel in data.get("panels", {}).items():
                 if panel["mode"] in ["button", "dropdown"]:
-                    view = self.build_view(guild, message_id, panel)
+                    view = await self.build_view(guild_id, int(message_id), panel)
                     self.bot.add_view(view)
+
+    async def get_panel(self, guild_id: int, message_id: int):
+        panels = await self.config.guild_from_id(guild_id).panels()
+        return panels.get(str(message_id))
 
     # =====================================================
     # GROUP
@@ -113,129 +135,70 @@ class ReactionRoles(commands.Cog):
         def check(m):
             return m.author == ctx.author and m.channel == ctx.channel
 
-        await ctx.send(
-            "**Reaction Role Setup Started**\n\n"
-            "You can type `cancel` at any time to stop."
-        )
+        await ctx.send("**Reaction Role Setup Started**\nType `cancel` anytime.")
 
-        # ---------------- CHANNEL ----------------
-
-        await ctx.send("1️⃣ Mention the channel where the panel should be sent.")
-
+        # CHANNEL
+        await ctx.send("Mention the channel for the panel.")
         while True:
             msg = await self.bot.wait_for("message", check=check)
-
             if msg.content.lower() == "cancel":
-                return await ctx.send("Setup cancelled.")
-
+                return await ctx.send("Cancelled.")
             if msg.channel_mentions:
                 channel = msg.channel_mentions[0]
                 break
+            await ctx.send("Mention a valid channel.")
 
-            await ctx.send("Please mention a valid channel.")
-
-        perms = channel.permissions_for(ctx.guild.me)
-        if not perms.send_messages or not perms.embed_links:
-            return await ctx.send("I cannot send embeds in that channel.")
-
-        # ---------------- TITLE ----------------
-
-        await ctx.send(
-            "2️⃣ Send the panel as:\n`Title | Description`\nUse `{roles}` to auto-list roles."
-        )
-
+        # TITLE/DESC
+        await ctx.send("Send as: `Title | Description` (use {roles} to auto list)")
         while True:
             msg = await self.bot.wait_for("message", check=check)
-
             if msg.content.lower() == "cancel":
-                return await ctx.send("Setup cancelled.")
-
+                return await ctx.send("Cancelled.")
             if "|" in msg.content:
                 title, description = [x.strip() for x in msg.content.split("|", 1)]
                 break
+            await ctx.send("Invalid format.")
 
-            await ctx.send("Invalid format. Use `Title | Description`.")
-
-        # ---------------- COLOR ----------------
-
-        await ctx.send("3️⃣ Send a hex color (example: `#FF0000`) or `none`.")
-
+        # COLOR
+        await ctx.send("Send hex color or `none`.")
         while True:
             msg = await self.bot.wait_for("message", check=check)
-
             if msg.content.lower() == "cancel":
-                return await ctx.send("Setup cancelled.")
-
+                return await ctx.send("Cancelled.")
             if msg.content.lower() == "none":
                 color = discord.Color.blurple()
                 break
-
             if HEX_REGEX.match(msg.content):
                 color = discord.Color(int(msg.content.replace("#", ""), 16))
                 break
+            await ctx.send("Invalid hex.")
 
-            await ctx.send("Invalid hex code.")
-
-        # ---------------- MODE ----------------
-
-        await ctx.send(
-            "4️⃣ Choose panel type:\n"
-            "`button` — clickable buttons\n"
-            "`dropdown` — select menu\n"
-            "`react` — classic reactions"
-        )
-
+        # MODE
+        await ctx.send("Type: `button`, `dropdown`, or `react`")
         while True:
             msg = await self.bot.wait_for("message", check=check)
-
-            if msg.content.lower() == "cancel":
-                return await ctx.send("Setup cancelled.")
-
             mode = msg.content.lower()
-
             if mode in ["button", "dropdown", "react"]:
                 break
-
             await ctx.send("Invalid option.")
 
-        # ---------------- UNIQUE ----------------
-
         unique = False
-
         if mode in ["button", "dropdown"]:
-            await ctx.send(
-                "5️⃣ Should users only have ONE role from this panel? (yes/no)"
-            )
-
+            await ctx.send("Unique mode? (yes/no)")
             while True:
                 msg = await self.bot.wait_for("message", check=check)
-
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Setup cancelled.")
-
                 if msg.content.lower() in ["yes", "y"]:
                     unique = True
                     break
                 if msg.content.lower() in ["no", "n"]:
                     break
+                await ctx.send("Answer yes or no.")
 
-                await ctx.send("Please answer yes or no.")
-
-        # ---------------- ROLES ----------------
-
+        # ROLES
         roles = {}
-
-        await ctx.send(
-            "6️⃣ Add roles using:\n`emoji @Role`\n\n"
-            "Example:\n🍆 @Sparkz's Bots\n\n"
-            "Type `done` when finished."
-        )
-
+        await ctx.send("Add roles using: `emoji @Role`\nType `done` when finished.")
         while True:
             msg = await self.bot.wait_for("message", check=check)
-
-            if msg.content.lower() == "cancel":
-                return await ctx.send("Setup cancelled.")
 
             if msg.content.lower() == "done":
                 if roles:
@@ -244,14 +207,10 @@ class ReactionRoles(commands.Cog):
                 continue
 
             if not msg.role_mentions:
-                await ctx.send("You must mention a role.")
+                await ctx.send("Mention a role.")
                 continue
 
             parts = msg.content.split()
-            if len(parts) < 2:
-                await ctx.send("Invalid format.")
-                continue
-
             emoji = parts[0]
             role = msg.role_mentions[0]
 
@@ -262,22 +221,21 @@ class ReactionRoles(commands.Cog):
 
             await msg.add_reaction("✅")
 
-        # ---------------- BUILD EMBED ----------------
-
+        # Build embed
         if "{roles}" in description:
             role_lines = "\n".join(
-                f"{data['emoji']} <@&{role_id}>" for role_id, data in roles.items()
+                f"{data['emoji']} <@&{rid}>" for rid, data in roles.items()
             )
             description = description.replace("{roles}", role_lines)
 
         embed = discord.Embed(title=title, description=description, color=color)
-
         message = await channel.send(embed=embed)
 
         panel_data = {
             "mode": mode,
             "roles": roles,
             "unique": unique,
+            "channel": channel.id,
         }
 
         if mode == "react":
@@ -285,31 +243,29 @@ class ReactionRoles(commands.Cog):
                 await message.add_reaction(data["emoji"])
 
         if mode in ["button", "dropdown"]:
-            view = self.build_view(ctx.guild, message.id, panel_data)
+            view = await self.build_view(ctx.guild.id, message.id, panel_data)
             await message.edit(view=view)
             self.bot.add_view(view)
 
         async with self.config.guild(ctx.guild).panels() as panels:
-            panels[str(message.id)] = {
-                "channel": channel.id,
-                **panel_data,
-            }
+            panels[str(message.id)] = panel_data
 
-        await ctx.send(f"Panel created in {channel.mention} (ID: {message.id})")
+        await ctx.message.add_reaction("✅")
 
     # =====================================================
     # BUILD VIEW
     # =====================================================
 
-    def build_view(self, guild, message_id, panel):
+    async def build_view(self, guild_id: int, message_id: int, panel):
         view = RRView()
 
         if panel["mode"] == "button":
-            for role_id, data in panel["roles"].items():
+            for rid, data in panel["roles"].items():
                 view.add_item(
                     RRButton(
-                        guild.id,
-                        int(role_id),
+                        guild_id,
+                        message_id,
+                        int(rid),
                         data["label"],
                         data["emoji"],
                     )
@@ -320,9 +276,9 @@ class ReactionRoles(commands.Cog):
                 discord.SelectOption(
                     label=data["label"],
                     emoji=data["emoji"],
-                    value=role_id,
+                    value=rid,
                 )
-                for role_id, data in panel["roles"].items()
+                for rid, data in panel["roles"].items()
             ]
 
             select = discord.ui.Select(
@@ -330,72 +286,44 @@ class ReactionRoles(commands.Cog):
                 options=options,
                 min_values=1,
                 max_values=1,
-                custom_id=f"rr_select_{guild.id}_{message_id}",
+                custom_id=f"rr_select_{guild_id}_{message_id}",
             )
 
             async def callback(interaction: discord.Interaction):
-                await interaction.response.defer(ephemeral=True)
+                cog = interaction.client.get_cog("ReactionRoles")
+                panel = await cog.get_panel(guild_id, message_id)
 
-                selected_role_id = int(select.values[0])
-                selected_role = interaction.guild.get_role(selected_role_id)
-
-                if not selected_role:
-                    return await interaction.followup.send(
-                        "Role not found.", ephemeral=True
-                    )
-
-                if selected_role >= interaction.guild.me.top_role:
-                    return await interaction.followup.send(
-                        "I cannot manage that role (it is above me).",
-                        ephemeral=True,
-                    )
-
+                role_id = int(select.values[0])
+                role = interaction.guild.get_role(role_id)
                 member = interaction.user
 
-                # UNIQUE MODE
-                if panel.get("unique"):
-                    for role_id in panel["roles"]:
-                        role = interaction.guild.get_role(int(role_id))
-                        if role in member.roles and role.id != selected_role_id:
-                            await member.remove_roles(role)
+                await interaction.response.defer(ephemeral=True)
 
-                if selected_role in member.roles:
-                    await member.remove_roles(selected_role)
+                if panel.get("unique"):
+                    for rid in panel["roles"]:
+                        r = interaction.guild.get_role(int(rid))
+                        if r in member.roles and r.id != role_id:
+                            await member.remove_roles(r)
+
+                if role in member.roles:
+                    await member.remove_roles(role)
                     await interaction.followup.send(
-                        f"Removed {selected_role.name}",
-                        ephemeral=True,
+                        f"Removed {role.name}", ephemeral=True
                     )
                 else:
-                    await member.add_roles(selected_role)
+                    await member.add_roles(role)
                     await interaction.followup.send(
-                        f"Added {selected_role.name}",
-                        ephemeral=True,
+                        f"Added {role.name}", ephemeral=True
                     )
+
+                # CLEAR DROPDOWN VISUALLY
+                new_view = await cog.build_view(guild_id, message_id, panel)
+                await interaction.message.edit(view=new_view)
 
             select.callback = callback
             view.add_item(select)
 
         return view
-
-    # =====================================================
-    # LIST
-    # =====================================================
-
-    @rr.command()
-    async def list(self, ctx):
-        panels = await self.config.guild(ctx.guild).panels()
-
-        if not panels:
-            return await ctx.send("No panels found.")
-
-        lines = []
-        for message_id, data in panels.items():
-            channel = ctx.guild.get_channel(data["channel"])
-            lines.append(
-                f"• ID: `{message_id}` | Channel: {channel.mention if channel else 'Unknown'} | Mode: {data['mode']} | Unique: {data.get('unique', False)}"
-            )
-
-        await ctx.send("\n".join(lines))
 
     # =====================================================
     # DELETE
@@ -407,7 +335,6 @@ class ReactionRoles(commands.Cog):
         async with self.config.guild(ctx.guild).panels() as panels:
             if str(message_id) not in panels:
                 return await ctx.send("Panel not found.")
-
             del panels[str(message_id)]
 
-        await ctx.send("Panel deleted from configuration.")
+        await ctx.send("Panel deleted.")
