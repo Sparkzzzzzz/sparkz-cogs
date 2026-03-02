@@ -6,25 +6,24 @@ from redbot.core.bot import Red
 HEX_REGEX = re.compile(r"^#?[0-9a-fA-F]{6}$")
 
 
-# ==========================================
-# VIEW CLASS
-# ==========================================
+# =========================================================
+# VIEW
+# =========================================================
 
+class RRButton(discord.ui.Button):
+    def __init__(self, role_id: int, label: str, emoji: str):
+        super().__init__(
+            label=label,
+            emoji=emoji,
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"rr_btn_{role_id}"
+        )
+        self.role_id = role_id
 
-class RRView(discord.ui.View):
-    def __init__(self, cog, guild_id, message_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.guild_id = guild_id
-        self.message_id = message_id
-
-    async def interaction_check(self, interaction: discord.Interaction):
-        return True
-
-    async def handle_role(self, interaction, role_id: int):
+    async def callback(self, interaction: discord.Interaction):
         guild = interaction.guild
         member = interaction.user
-        role = guild.get_role(role_id)
+        role = guild.get_role(self.role_id)
 
         if not role:
             return await interaction.response.send_message(
@@ -43,40 +42,46 @@ class RRView(discord.ui.View):
             )
 
 
-# ==========================================
-# MAIN COG
-# ==========================================
+class RRView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
+
+# =========================================================
+# COG
+# =========================================================
 
 class ReactionRoles(commands.Cog):
-    """Advanced Reaction Roles (Buttons / Dropdown / React)"""
+    """Stable Reaction Roles v2"""
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=1122334455)
+        self.config = Config.get_conf(self, identifier=7788990011)
         self.config.register_guild(messages={})
 
     async def cog_load(self):
-        # Re-attach persistent views on restart
+        # Re-attach persistent views
         for guild in self.bot.guilds:
             data = await self.config.guild(guild).messages()
             for message_id, rr_data in data.items():
                 if rr_data["mode"] in ["button", "dropdown"]:
-                    view = await self.build_view(guild.id, int(message_id), rr_data)
+                    view = await self.build_view(rr_data)
                     self.bot.add_view(view)
 
-    # ======================================
+    # =====================================================
     # GROUP
-    # ======================================
+    # =====================================================
 
-    @commands.group()
+    @commands.group(name="rr")
     @commands.guild_only()
     async def rr(self, ctx):
-        pass
+        """Reaction role commands."""
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Subcommands: make, delete")
 
-    # ======================================
-    # MAKE
-    # ======================================
+    # =====================================================
+    # MAKE (STABLE WIZARD)
+    # =====================================================
 
     @rr.command()
     @commands.admin_or_permissions(manage_roles=True)
@@ -85,49 +90,125 @@ class ReactionRoles(commands.Cog):
         def check(m):
             return m.author == ctx.author and m.channel == ctx.channel
 
-        await ctx.send("Which channel?")
-        msg = await self.bot.wait_for("message", check=check)
-        if msg.content.lower() == "cancel":
-            return await ctx.send("Cancelled.")
+        # ---------------- CHANNEL ----------------
 
-        if not msg.channel_mentions:
-            return await ctx.send("Mention a channel.")
+        while True:
+            await ctx.send(
+                "Which channel should the panel be sent in?\n"
+                "Mention it. Type `cancel` to exit."
+            )
 
-        channel = msg.channel_mentions[0]
+            msg = await self.bot.wait_for("message", check=check)
 
-        await ctx.send("Send `Title | Description`")
-        msg = await self.bot.wait_for("message", check=check)
-        if "|" not in msg.content:
-            return await ctx.send("Invalid format.")
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Setup cancelled.")
 
-        title, description = [x.strip() for x in msg.content.split("|", 1)]
+            if msg.channel_mentions:
+                channel = msg.channel_mentions[0]
+                break
 
-        await ctx.send("Hex color or `none`?")
-        msg = await self.bot.wait_for("message", check=check)
+            await ctx.send("Invalid channel. Please mention a channel.")
 
-        if msg.content.lower() == "none":
-            color = discord.Color.blurple()
-        else:
-            if not HEX_REGEX.match(msg.content):
-                return await ctx.send("Invalid hex.")
-            color = discord.Color(int(msg.content.replace("#", ""), 16))
+        # Permission check
+        perms = channel.permissions_for(ctx.guild.me)
+        if not perms.send_messages or not perms.embed_links:
+            return await ctx.send("I lack permission to send embeds there.")
 
-        await ctx.send("Select mode: `button`, `react`, or `dropdown`")
-        msg = await self.bot.wait_for("message", check=check)
-        mode = msg.content.lower()
+        # ---------------- TITLE / DESCRIPTION ----------------
 
-        if mode not in ["button", "react", "dropdown"]:
-            return await ctx.send("Invalid mode.")
+        while True:
+            await ctx.send(
+                "Send the message as:\n"
+                "`Title | Description`\n"
+                "Use `{roles}` to auto-insert role list.\n"
+                "Type `cancel` to exit."
+            )
 
-        await ctx.send("Add roles using `emoji role_name` — type `done` when finished")
+            msg = await self.bot.wait_for("message", check=check)
+
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Setup cancelled.")
+
+            if "|" in msg.content:
+                title, description = [
+                    x.strip() for x in msg.content.split("|", 1)
+                ]
+                break
+
+            await ctx.send("Invalid format. Use `Title | Description`.")
+
+        # ---------------- COLOR ----------------
+
+        while True:
+            await ctx.send(
+                "Send hex color (example: #FF0000) or `none`.\n"
+                "Type `cancel` to exit."
+            )
+
+            msg = await self.bot.wait_for("message", check=check)
+
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Setup cancelled.")
+
+            if msg.content.lower() == "none":
+                color = discord.Color.blurple()
+                break
+
+            if HEX_REGEX.match(msg.content):
+                color = discord.Color(int(msg.content.replace("#", ""), 16))
+                break
+
+            await ctx.send("Invalid hex code. Try again.")
+
+        # ---------------- MODE ----------------
+
+        while True:
+            await ctx.send(
+                "Select mode:\n"
+                "`button` — clickable buttons\n"
+                "`dropdown` — select menu\n"
+                "`react` — classic reactions\n"
+                "Type `cancel` to exit."
+            )
+
+            msg = await self.bot.wait_for("message", check=check)
+            mode = msg.content.lower()
+
+            if mode == "cancel":
+                return await ctx.send("Setup cancelled.")
+
+            if mode in ["button", "dropdown", "react"]:
+                break
+
+            await ctx.send("Invalid mode.")
+
+        # ---------------- ROLE COLLECTION ----------------
 
         roles = {}
+
+        await ctx.send(
+            "Now add roles in this format:\n"
+            "`emoji @Role`\n\n"
+            "Example:\n"
+            "🍆 @Sparkz's Bots\n\n"
+            "Type `done` when finished."
+        )
 
         while True:
             msg = await self.bot.wait_for("message", check=check)
 
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Setup cancelled.")
+
             if msg.content.lower() == "done":
+                if not roles:
+                    await ctx.send("You must add at least one role.")
+                    continue
                 break
+
+            if not msg.role_mentions:
+                await ctx.send("You must mention a role.")
+                continue
 
             parts = msg.content.split()
             if len(parts) < 2:
@@ -135,33 +216,47 @@ class ReactionRoles(commands.Cog):
                 continue
 
             emoji = parts[0]
-            role_name = " ".join(parts[1:])
+            role = msg.role_mentions[0]
 
-            role = discord.utils.get(ctx.guild.roles, name=role_name)
-            if not role:
-                await ctx.send("Role not found.")
-                continue
-
-            roles[str(role.id)] = {"emoji": emoji, "label": role.name}
+            roles[str(role.id)] = {
+                "emoji": emoji,
+                "label": role.name
+            }
 
             await ctx.send(f"Linked {emoji} → {role.name}")
 
+        # ---------------- BUILD EMBED ----------------
+
+        if "{roles}" in description:
+            role_lines = "\n".join(
+                f"{data['emoji']} <@&{role_id}>"
+                for role_id, data in roles.items()
+            )
+            description = description.replace("{roles}", role_lines)
+
         embed = discord.Embed(title=title, description=description, color=color)
+
+        await ctx.send("Creating panel...")
 
         message = await channel.send(embed=embed)
 
-        # REACT MODE
+        # ---------------- APPLY MODE ----------------
+
         if mode == "react":
             for role_id, data in roles.items():
                 await message.add_reaction(data["emoji"])
 
-        # BUTTON / DROPDOWN MODE
         if mode in ["button", "dropdown"]:
-            rr_data = {"roles": roles, "mode": mode}
-            view = await self.build_view(ctx.guild.id, message.id, rr_data)
+            rr_data = {
+                "roles": roles,
+                "mode": mode
+            }
+
+            view = await self.build_view(rr_data)
             await message.edit(view=view)
             self.bot.add_view(view)
 
+        # Save config
         async with self.config.guild(ctx.guild).messages() as messages:
             messages[str(message.id)] = {
                 "channel": channel.id,
@@ -169,63 +264,67 @@ class ReactionRoles(commands.Cog):
                 "description": description,
                 "color": color.value,
                 "mode": mode,
-                "roles": roles,
+                "roles": roles
             }
 
-        await ctx.send("Reaction role panel created.")
+        await ctx.send(f"Panel created in {channel.mention}.")
 
-    # ======================================
+    # =====================================================
     # BUILD VIEW
-    # ======================================
+    # =====================================================
 
-    async def build_view(self, guild_id, message_id, rr_data):
-        view = RRView(self, guild_id, message_id)
+    async def build_view(self, rr_data):
+        view = RRView()
 
-        roles = rr_data["roles"]
-        mode = rr_data["mode"]
-
-        if mode == "button":
-            for role_id, data in roles.items():
-                button = discord.ui.Button(
-                    label=data["label"],
-                    emoji=data["emoji"],
-                    style=discord.ButtonStyle.secondary,
-                )
-
-                async def callback(interaction, r_id=int(role_id)):
-                    await view.handle_role(interaction, r_id)
-
-                button.callback = callback
-                view.add_item(button)
-
-        elif mode == "dropdown":
-            options = []
-            for role_id, data in roles.items():
-                options.append(
-                    discord.SelectOption(
-                        label=data["label"], emoji=data["emoji"], value=role_id
+        if rr_data["mode"] == "button":
+            for role_id, data in rr_data["roles"].items():
+                view.add_item(
+                    RRButton(
+                        role_id=int(role_id),
+                        label=data["label"],
+                        emoji=data["emoji"]
                     )
                 )
+
+        elif rr_data["mode"] == "dropdown":
+            options = [
+                discord.SelectOption(
+                    label=data["label"],
+                    emoji=data["emoji"],
+                    value=role_id
+                )
+                for role_id, data in rr_data["roles"].items()
+            ]
 
             select = discord.ui.Select(
                 placeholder="Select your role",
                 options=options,
                 min_values=1,
-                max_values=1,
+                max_values=1
             )
 
             async def select_callback(interaction):
                 for value in select.values:
-                    await view.handle_role(interaction, int(value))
+                    role = interaction.guild.get_role(int(value))
+                    if role in interaction.user.roles:
+                        await interaction.user.remove_roles(role)
+                        await interaction.response.send_message(
+                            f"Removed {role.name}", ephemeral=True
+                        )
+                    else:
+                        await interaction.user.add_roles(role)
+                        await interaction.response.send_message(
+                            f"Added {role.name}", ephemeral=True
+                        )
 
             select.callback = select_callback
             view.add_item(select)
 
         return view
 
-    # ======================================
-    # REACTION LISTENER
-    # ======================================
+    # =====================================================
+    # REACT LISTENER
+    # =====================================================
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -234,6 +333,7 @@ class ReactionRoles(commands.Cog):
 
         guild = self.bot.get_guild(payload.guild_id)
         member = guild.get_member(payload.user_id)
+
         if not member or member.bot:
             return
 
@@ -253,16 +353,16 @@ class ReactionRoles(commands.Cog):
                 if role:
                     await member.add_roles(role)
 
-    # ======================================
+    # =====================================================
     # DELETE
-    # ======================================
+    # =====================================================
 
     @rr.command()
     @commands.admin_or_permissions(manage_roles=True)
     async def delete(self, ctx, message_id: int):
         async with self.config.guild(ctx.guild).messages() as messages:
             if str(message_id) not in messages:
-                return await ctx.send("Not found.")
+                return await ctx.send("Panel not found.")
             del messages[str(message_id)]
 
-        await ctx.send("Reaction role panel deleted from config.")
+        await ctx.send("Panel configuration deleted.")
