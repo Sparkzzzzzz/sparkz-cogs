@@ -1,5 +1,6 @@
 from redbot.core import commands
 import discord
+from discord import MessageType
 
 ROLE_WELCOME_ID = 1196441293883199508
 ROLE_WELCOME_CHANNEL_ID = 1196222261305286809
@@ -59,6 +60,50 @@ class SandWelcome(commands.Cog):
             embed.set_footer(text="Sent by the amazing Shark Bot!")
 
             await welcome_channel.send(f"Welcome, {after.mention}!", embed=embed)
+
+    @commands.command()
+    @commands.has_role(1307731573927317625)
+    async def catchupwelcomes(self, ctx):
+        """Sends missed welcome messages based on join logs"""
+
+        channel = ctx.guild.get_channel(1195856838843969656)
+
+        # Get last bot message
+        last_bot_message = None
+        async for message in channel.history(limit=200):
+            if message.author == self.bot.user:
+                last_bot_message = message
+                break
+
+        members_to_welcome = []
+
+        async for message in channel.history(
+            after=last_bot_message.created_at if last_bot_message else None,
+            limit=200
+        ):
+            if message.type == MessageType.new_member:
+                member = message.author
+                if member and not member.bot and member not in members_to_welcome:
+                    members_to_welcome.append(member)
+
+        if not members_to_welcome:
+            await ctx.send("No missed welcomes found.")
+            return
+
+        for member in members_to_welcome:
+            embed = discord.Embed(
+                title=f"Bayarlaakhaa {member.display_name}!",
+                description="The Khaars and the Ondokhaar welcome you to the desert with open arms.",
+                color=0xFFD700,
+            )
+            embed.set_image(
+                url="https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExczF5Zjh6ZTNqZ3h4dXQ2MjZyYWlrNHk1N2Nwc2Z2aHdzY2Roc3F1aiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7A6FyTLMQ3xlI0ex4L/giphy.gif"
+            )
+            embed.set_footer(text="Sent by Shark Bot")
+
+            await channel.send(f"Welcome, {member.mention}!", embed=embed)
+
+        await ctx.send(f"✅ Sent {len(members_to_welcome)} missed welcomes.")
 
 
 async def setup(bot):
