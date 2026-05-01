@@ -35,9 +35,8 @@ class SDisable(commands.Cog):
                 self.bot.remove_command(name)
 
     def _restore_commands(self):
-        """Re-add previously removed commands."""
         for name, cmd in self._stored_commands.items():
-            self.bot.add_command(cmd, override=True)  # ensure it properly restores
+            self.bot.add_command(cmd)
         self._stored_commands.clear()
 
     @commands.Cog.listener()
