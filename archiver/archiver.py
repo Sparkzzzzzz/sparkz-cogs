@@ -551,6 +551,34 @@ class Archiver(commands.Cog):
     #  Restore helpers
     # ------------------------------------------------------------------ #
 
+    async def _move_or_recreate(
+        self,
+        guild: discord.Guild,
+        snapshot: dict,
+        target_category: Optional[discord.CategoryChannel],
+        overwrites: dict,
+    ) -> discord.abc.GuildChannel:
+        """
+        Try to move the original channel back. If it no longer exists, recreate it.
+        The snapshot stores the channel's ID so we can find it in the archive.
+        """
+        existing = guild.get_channel(snapshot["id"])
+        if existing is not None:
+            # Channel still exists (sitting in archive) — move it back and restore perms
+            await existing.edit(
+                name=snapshot["name"],
+                category=target_category,
+                position=snapshot["position"],
+            )
+            await asyncio.sleep(0.5)
+            await self._apply_overwrites(existing, overwrites)
+            return existing
+        else:
+            # Channel was deleted or not found — recreate from snapshot
+            return await self._create_channel_from_snapshot(
+                guild, snapshot, target_category, overwrites
+            )
+
     async def _restore_category(self, ctx: commands.Context, snapshot: dict):
         guild = ctx.guild
         overwrites = self._deserialize_overwrites(guild, snapshot["overwrites"])
@@ -566,8 +594,12 @@ class Archiver(commands.Cog):
         failed = []
         for ch_snap in children:
             try:
-                await self._restore_channel_to_category(guild, ch_snap, new_cat)
+                ch_overwrites = self._deserialize_overwrites(
+                    guild, ch_snap["overwrites"]
+                )
+                await self._move_or_recreate(guild, ch_snap, new_cat, ch_overwrites)
                 restored.append(ch_snap["name"])
+                await asyncio.sleep(0.5)
             except discord.Forbidden:
                 failed.append(ch_snap["name"])
             except discord.HTTPException as e:
@@ -588,9 +620,7 @@ class Archiver(commands.Cog):
         )
 
         try:
-            await self._create_channel_from_snapshot(
-                guild, snapshot, original_cat, overwrites
-            )
+            await self._move_or_recreate(guild, snapshot, original_cat, overwrites)
             dest = original_cat.name if original_cat else "no category"
             await ctx.send(f"✅ Restored channel **#{snapshot['name']}** to {dest}.")
         except discord.Forbidden:
@@ -607,7 +637,7 @@ class Archiver(commands.Cog):
         category: discord.CategoryChannel,
     ):
         overwrites = self._deserialize_overwrites(guild, snapshot["overwrites"])
-        await self._create_channel_from_snapshot(guild, snapshot, category, overwrites)
+        await self._move_or_recreate(guild, snapshot, category, overwrites)
         await asyncio.sleep(0.75)
 
     async def _create_channel_from_snapshot(
