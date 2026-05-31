@@ -304,15 +304,24 @@ class Archiver(commands.Cog):
         async with self.config.guild(ctx.guild).archived_items() as items:
             items[str(category.id)] = {"type": "category", "snapshot": snapshot}
 
+        moved = []
+        failed = []
         for channel in list(category.channels):
-            await channel.edit(category=archive_cat, sync_permissions=False)
-            await channel.edit(overwrites=archive_overwrites)
+            try:
+                await channel.edit(category=archive_cat, sync_permissions=False)
+                await channel.edit(overwrites=archive_overwrites)
+                moved.append(channel.name)
+            except discord.Forbidden:
+                failed.append(channel.name)
+            except discord.HTTPException as e:
+                failed.append(f"{channel.name} ({e})")
 
         await category.delete(reason=f"Archived by {ctx.author}")
-        await ctx.send(
-            f"✅ Archived category **{snapshot['name']}** and moved "
-            f"{len(snapshot['children'])} channel(s) to the archive."
-        )
+
+        msg = f"✅ Archived category **{snapshot['name']}** — moved {len(moved)}/{len(snapshot['children'])} channel(s)."
+        if failed:
+            msg += f"\n⚠️ Failed to update permissions on: {', '.join(failed)} — check the bot has Manage Roles permission."
+        await ctx.send(msg)
 
     # ---- archive settings ----------------------------------------------
 
@@ -493,12 +502,21 @@ class Archiver(commands.Cog):
         )
 
         children = sorted(snapshot["children"], key=lambda c: c["position"])
+        restored = []
+        failed = []
         for ch_snap in children:
-            await self._restore_channel_to_category(guild, ch_snap, new_cat)
+            try:
+                await self._restore_channel_to_category(guild, ch_snap, new_cat)
+                restored.append(ch_snap["name"])
+            except discord.Forbidden:
+                failed.append(ch_snap["name"])
+            except discord.HTTPException as e:
+                failed.append(f"{ch_snap['name']} ({e})")
 
-        await ctx.send(
-            f"✅ Restored category **{snapshot['name']}** with {len(children)} channel(s)."
-        )
+        msg = f"✅ Restored category **{snapshot['name']}** with {len(restored)}/{len(children)} channel(s)."
+        if failed:
+            msg += f"\n⚠️ Failed to restore: {', '.join(failed)}"
+        await ctx.send(msg)
 
     async def _restore_channel(self, ctx: commands.Context, snapshot: dict):
         guild = ctx.guild
@@ -509,11 +527,18 @@ class Archiver(commands.Cog):
             else None
         )
 
-        await self._create_channel_from_snapshot(
-            guild, snapshot, original_cat, overwrites
-        )
-        dest = original_cat.name if original_cat else "no category"
-        await ctx.send(f"✅ Restored channel **#{snapshot['name']}** to {dest}.")
+        try:
+            await self._create_channel_from_snapshot(
+                guild, snapshot, original_cat, overwrites
+            )
+            dest = original_cat.name if original_cat else "no category"
+            await ctx.send(f"✅ Restored channel **#{snapshot['name']}** to {dest}.")
+        except discord.Forbidden:
+            await ctx.send(
+                f"❌ Missing permissions to restore **#{snapshot['name']}**."
+            )
+        except discord.HTTPException as e:
+            await ctx.send(f"❌ Failed to restore **#{snapshot['name']}**: {e}")
 
     async def _restore_channel_to_category(
         self,
