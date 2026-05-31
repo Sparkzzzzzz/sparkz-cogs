@@ -53,12 +53,18 @@ class Archiver(commands.Cog):
         return [guild.get_role(r) for r in ids if guild.get_role(r)]
 
     async def _build_archive_overwrites(self, guild: discord.Guild):
-        """Return permission overwrites: default deny everyone, allow admin roles."""
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        }
-        for role in await self._admin_roles(guild):
-            overwrites[role] = discord.PermissionOverwrite(view_channel=True)
+        """Return permission overwrites: deny everyone + all roles, allow only admin roles."""
+        admin_role_ids = set(await self.config.guild(guild).admin_roles())
+        admin_roles = [guild.get_role(r) for r in admin_role_ids if guild.get_role(r)]
+
+        # Start by explicitly denying every role in the server
+        overwrites = {}
+        for role in guild.roles:
+            if role in admin_roles:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True)
+            else:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=False)
+
         return overwrites
 
     def _serialize_overwrites(self, overwrites: dict) -> list:
@@ -167,7 +173,7 @@ class Archiver(commands.Cog):
 
     @archive_admins.command(name="add")
     async def archive_admins_add(self, ctx: commands.Context, *roles: discord.Role):
-        """Add roles that can view the archive category."""
+        """Add roles that can view the archive category. Syncs permissions to all archived channels immediately."""
         if not roles:
             return await ctx.send("Please specify at least one role.")
         async with self.config.guild(ctx.guild).admin_roles() as admin_roles:
@@ -176,14 +182,20 @@ class Archiver(commands.Cog):
                 if role.id not in admin_roles:
                     admin_roles.append(role.id)
                     added.append(role.name)
-        if added:
-            await ctx.send(f"✅ Added archive admin roles: {', '.join(added)}")
-        else:
-            await ctx.send("Those roles were already in the list.")
+        if not added:
+            return await ctx.send("Those roles were already in the list.")
+        await ctx.send(
+            f"✅ Added archive admin roles: {', '.join(added)}. Syncing permissions to all archived channels..."
+        )
+        synced, failed = await self._sync_archive_permissions(ctx.guild)
+        await ctx.send(
+            f"🔄 Synced permissions on {synced} channel(s)."
+            + (f"\n⚠️ Failed on {failed} channel(s)." if failed else "")
+        )
 
     @archive_admins.command(name="remove")
     async def archive_admins_remove(self, ctx: commands.Context, *roles: discord.Role):
-        """Remove roles from the archive admin list."""
+        """Remove roles from the archive admin list. Syncs permissions to all archived channels immediately."""
         if not roles:
             return await ctx.send("Please specify at least one role.")
         async with self.config.guild(ctx.guild).admin_roles() as admin_roles:
@@ -192,10 +204,35 @@ class Archiver(commands.Cog):
                 if role.id in admin_roles:
                     admin_roles.remove(role.id)
                     removed.append(role.name)
-        if removed:
-            await ctx.send(f"✅ Removed archive admin roles: {', '.join(removed)}")
-        else:
-            await ctx.send("Those roles weren't in the list.")
+        if not removed:
+            return await ctx.send("Those roles weren't in the list.")
+        await ctx.send(
+            f"✅ Removed archive admin roles: {', '.join(removed)}. Syncing permissions to all archived channels..."
+        )
+        synced, failed = await self._sync_archive_permissions(ctx.guild)
+        await ctx.send(
+            f"🔄 Synced permissions on {synced} channel(s)."
+            + (f"\n⚠️ Failed on {failed} channel(s)." if failed else "")
+        )
+
+    @archive_admins.command(name="sync")
+    async def archive_admins_sync(self, ctx: commands.Context):
+        """Manually sync current admin role permissions to every channel in the archive category."""
+        archive_cat = await self._get_archive_category(ctx.guild)
+        if not archive_cat:
+            return await ctx.send("❌ No archive category set.")
+        await ctx.send(
+            f"🔄 Syncing permissions across {len(archive_cat.channels)} channel(s) in **{archive_cat.name}**..."
+        )
+        synced, failed = await self._sync_archive_permissions(ctx.guild)
+        await ctx.send(
+            f"✅ Done — synced {synced} channel(s)."
+            + (
+                f"\n⚠️ Failed on {failed} channel(s) (check Manage Roles permission)."
+                if failed
+                else ""
+            )
+        )
 
     # ---- archive createcategory ----------------------------------------
 
@@ -600,6 +637,36 @@ class Archiver(commands.Cog):
             channel = await guild.create_text_channel(**kwargs)
 
         return channel
+
+    async def _sync_archive_permissions(self, guild: discord.Guild):
+        """Apply current admin role overwrites to every channel in the archive category.
+        Returns (synced_count, failed_count)."""
+        archive_cat = await self._get_archive_category(guild)
+        if not archive_cat:
+            return 0, 0
+
+        new_overwrites = await self._build_archive_overwrites(guild)
+        synced = 0
+        failed = 0
+
+        # Update the category itself
+        try:
+            await archive_cat.edit(overwrites=new_overwrites)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        # Update every channel inside it
+        channels = list(archive_cat.channels)
+        for i, channel in enumerate(channels):
+            try:
+                await channel.edit(overwrites=new_overwrites, sync_permissions=False)
+                synced += 1
+            except (discord.Forbidden, discord.HTTPException):
+                failed += 1
+            if i < len(channels) - 1:
+                await asyncio.sleep(0.75)
+
+        return synced, failed
 
 
 async def setup(bot: Red):
