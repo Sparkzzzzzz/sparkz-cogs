@@ -1,0 +1,13 @@
+{
+    "name": "Archiver",
+    "short": "Archive channels and categories, restore them perfectly.",
+    "description": "Archive individual channels or entire categories into a restricted archive category. Snapshots all permissions, positions, topics, and metadata so everything can be restored exactly as it was.",
+    "version": "1.0.0",
+    "author": ["you"],
+    "install_msg": "Use `[p]category create Archive` (or `category set`) to get started, then `[p]archive admins add <role>` to grant visibility.",
+    "required_cogs": {},
+    "requirements": [],
+    "tags": ["archive", "channels", "moderation"],
+    "min_bot_version": "3.5.0",
+    "min_python_version": [3, 8, 0]
+}
