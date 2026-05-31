@@ -18,12 +18,14 @@ class Archiver(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0xARC8IV3R, force_registration=True)
+        self.config = Config.get_conf(
+            self, identifier=114753329, force_registration=True
+        )
 
         default_guild = {
-            "archive_category_id": None,   # the designated archive category
-            "admin_roles": [],              # role IDs that can see archived channels
-            "archived_items": {},           # keyed by original channel/category id (str)
+            "archive_category_id": None,  # the designated archive category
+            "admin_roles": [],  # role IDs that can see archived channels
+            "archived_items": {},  # keyed by original channel/category id (str)
         }
         self.config.register_guild(**default_guild)
 
@@ -31,7 +33,9 @@ class Archiver(commands.Cog):
     #  Helpers
     # ------------------------------------------------------------------ #
 
-    async def _get_archive_category(self, guild: discord.Guild) -> Optional[discord.CategoryChannel]:
+    async def _get_archive_category(
+        self, guild: discord.Guild
+    ) -> Optional[discord.CategoryChannel]:
         cat_id = await self.config.guild(guild).archive_category_id()
         if cat_id:
             return guild.get_channel(cat_id)
@@ -55,12 +59,14 @@ class Archiver(commands.Cog):
         result = []
         for target, ow in overwrites.items():
             allow, deny = ow.pair()
-            result.append({
-                "type": "role" if isinstance(target, discord.Role) else "member",
-                "id": target.id,
-                "allow": allow.value,
-                "deny": deny.value,
-            })
+            result.append(
+                {
+                    "type": "role" if isinstance(target, discord.Role) else "member",
+                    "id": target.id,
+                    "allow": allow.value,
+                    "deny": deny.value,
+                }
+            )
         return result
 
     def _deserialize_overwrites(self, guild: discord.Guild, data: list) -> dict:
@@ -78,7 +84,11 @@ class Archiver(commands.Cog):
             overwrites[target] = discord.PermissionOverwrite.from_pair(allow, deny)
         return overwrites
 
-    async def _snapshot_channel(self, channel: discord.abc.GuildChannel, category_snapshot_id: Optional[int] = None) -> dict:
+    async def _snapshot_channel(
+        self,
+        channel: discord.abc.GuildChannel,
+        category_snapshot_id: Optional[int] = None,
+    ) -> dict:
         """Capture everything needed to perfectly restore a channel."""
         return {
             "id": channel.id,
@@ -91,7 +101,7 @@ class Archiver(commands.Cog):
             "bitrate": getattr(channel, "bitrate", None),
             "user_limit": getattr(channel, "user_limit", None),
             "category_id": channel.category_id,
-            "category_snapshot_id": category_snapshot_id,   # ref to parent snapshot
+            "category_snapshot_id": category_snapshot_id,  # ref to parent snapshot
             "overwrites": self._serialize_overwrites(channel.overwrites),
             "archived_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -100,7 +110,9 @@ class Archiver(commands.Cog):
         """Capture everything needed to perfectly restore a category + children."""
         children = []
         for ch in category.channels:
-            children.append(await self._snapshot_channel(ch, category_snapshot_id=category.id))
+            children.append(
+                await self._snapshot_channel(ch, category_snapshot_id=category.id)
+            )
 
         return {
             "id": category.id,
@@ -121,7 +133,9 @@ class Archiver(commands.Cog):
         """Manage archive categories."""
 
     @category_group.command(name="set")
-    async def category_set(self, ctx: commands.Context, category: discord.CategoryChannel):
+    async def category_set(
+        self, ctx: commands.Context, category: discord.CategoryChannel
+    ):
         """Set an existing category as the archive destination."""
         await self.config.guild(ctx.guild).archive_category_id.set(category.id)
         await ctx.send(f"✅ Archive category set to **{category.name}**.")
@@ -184,14 +198,18 @@ class Archiver(commands.Cog):
     # ------------------------------------------------------------------ #
 
     @archive_group.command(name="add")
-    async def archive_add(self, ctx: commands.Context, *channels: discord.abc.GuildChannel):
+    async def archive_add(
+        self, ctx: commands.Context, *channels: discord.abc.GuildChannel
+    ):
         """Archive individual channels (moves them into the archive category)."""
         if not channels:
             return await ctx.send("Please specify at least one channel.")
 
         archive_cat = await self._get_archive_category(ctx.guild)
         if not archive_cat:
-            return await ctx.send("❌ No archive category set. Use `category set` or `category create` first.")
+            return await ctx.send(
+                "❌ No archive category set. Use `category set` or `category create` first."
+            )
 
         archive_overwrites = await self._build_archive_overwrites(ctx.guild)
         async with self.config.guild(ctx.guild).archived_items() as items:
@@ -211,11 +229,15 @@ class Archiver(commands.Cog):
     # ------------------------------------------------------------------ #
 
     @archive_group.command(name="category")
-    async def archive_category(self, ctx: commands.Context, category: discord.CategoryChannel):
+    async def archive_category(
+        self, ctx: commands.Context, category: discord.CategoryChannel
+    ):
         """Move all channels from a category into the archive, then delete the category."""
         archive_cat = await self._get_archive_category(ctx.guild)
         if not archive_cat:
-            return await ctx.send("❌ No archive category set. Use `category set` or `category create` first.")
+            return await ctx.send(
+                "❌ No archive category set. Use `category set` or `category create` first."
+            )
         if category.id == archive_cat.id:
             return await ctx.send("❌ You can't archive the archive category itself.")
 
@@ -231,7 +253,9 @@ class Archiver(commands.Cog):
             await channel.edit(overwrites=archive_overwrites)
 
         await category.delete(reason=f"Archived by {ctx.author}")
-        await ctx.send(f"✅ Archived category **{category.name}** and moved {len(snapshot['children'])} channel(s) to the archive.")
+        await ctx.send(
+            f"✅ Archived category **{category.name}** and moved {len(snapshot['children'])} channel(s) to the archive."
+        )
 
     # ------------------------------------------------------------------ #
     #  archived list
@@ -261,7 +285,9 @@ class Archiver(commands.Cog):
 
         for _id, (cat_name, channels, archived_at) in category_entries.items():
             ts = archived_at[:10] if archived_at else "?"
-            channel_list = "\n".join(f"  • #{n}" for n in channels) or "  *(no channels)*"
+            channel_list = (
+                "\n".join(f"  • #{n}" for n in channels) or "  *(no channels)*"
+            )
             embed.add_field(
                 name=f"📁 {cat_name}  *(archived {ts})*",
                 value=channel_list,
@@ -269,8 +295,12 @@ class Archiver(commands.Cog):
             )
 
         if lone_channels:
-            lone_text = "\n".join(f"• #{name}  *(archived {ts[:10]})*" for name, ts in lone_channels)
-            embed.add_field(name="📄 Individual Channels", value=lone_text, inline=False)
+            lone_text = "\n".join(
+                f"• #{name}  *(archived {ts[:10]})*" for name, ts in lone_channels
+            )
+            embed.add_field(
+                name="📄 Individual Channels", value=lone_text, inline=False
+            )
 
         await ctx.send(embed=embed)
 
@@ -333,15 +363,23 @@ class Archiver(commands.Cog):
         for ch_snap in children:
             await self._restore_channel_to_category(guild, ch_snap, new_cat)
 
-        await ctx.send(f"✅ Restored category **{snapshot['name']}** with {len(children)} channel(s).")
+        await ctx.send(
+            f"✅ Restored category **{snapshot['name']}** with {len(children)} channel(s)."
+        )
 
     async def _restore_channel(self, ctx: commands.Context, snapshot: dict):
         """Restore a lone channel to its original category (if still exists) and permissions."""
         guild = ctx.guild
         overwrites = self._deserialize_overwrites(guild, snapshot["overwrites"])
-        original_cat = guild.get_channel(snapshot["category_id"]) if snapshot.get("category_id") else None
+        original_cat = (
+            guild.get_channel(snapshot["category_id"])
+            if snapshot.get("category_id")
+            else None
+        )
 
-        channel = await self._create_channel_from_snapshot(guild, snapshot, original_cat, overwrites)
+        channel = await self._create_channel_from_snapshot(
+            guild, snapshot, original_cat, overwrites
+        )
         dest = original_cat.name if original_cat else "no category"
         await ctx.send(f"✅ Restored channel **#{snapshot['name']}** to {dest}.")
 
