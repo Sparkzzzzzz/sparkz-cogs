@@ -218,17 +218,31 @@ class Archiver(commands.Cog):
     @archive_admins.command(name="sync")
     async def archive_admins_sync(self, ctx: commands.Context):
         """Manually sync current admin role permissions to every channel in the archive category."""
-        archive_cat = await self._get_archive_category(ctx.guild)
-        if not archive_cat:
+        cat_id = await self.config.guild(ctx.guild).archive_category_id()
+        if not cat_id:
             return await ctx.send("❌ No archive category set.")
-        await ctx.send(
-            f"🔄 Syncing permissions across {len(archive_cat.channels)} channel(s) in **{archive_cat.name}**..."
+
+        # Re-fetch fresh from cache
+        archive_cat = ctx.guild.get_channel(cat_id)
+        if not archive_cat:
+            return await ctx.send("❌ Archive category not found in this server.")
+
+        admin_roles = await self._admin_roles(ctx.guild)
+        roles_text = (
+            ", ".join(r.name for r in admin_roles) if admin_roles else "*(none)*"
         )
+        channels = list(archive_cat.channels)
+
+        await ctx.send(
+            f"🔄 Found **{len(channels)}** channel(s) in **{archive_cat.name}**\n"
+            f"Admin roles being applied: {roles_text}"
+        )
+
         synced, failed = await self._sync_archive_permissions(ctx.guild)
         await ctx.send(
             f"✅ Done — synced {synced} channel(s)."
             + (
-                f"\n⚠️ Failed on {failed} channel(s) (check Manage Roles permission)."
+                f"\n⚠️ Failed on {failed} channel(s) — check logs with `[p]traceback`."
                 if failed
                 else ""
             )
@@ -641,7 +655,10 @@ class Archiver(commands.Cog):
     async def _sync_archive_permissions(self, guild: discord.Guild):
         """Apply current admin role overwrites to every channel in the archive category.
         Returns (synced_count, failed_count)."""
-        archive_cat = await self._get_archive_category(guild)
+        cat_id = await self.config.guild(guild).archive_category_id()
+        if not cat_id:
+            return 0, 0
+        archive_cat = guild.get_channel(cat_id)
         if not archive_cat:
             return 0, 0
 
@@ -649,22 +666,51 @@ class Archiver(commands.Cog):
         synced = 0
         failed = 0
 
-        # Update the category itself
+        import logging
+
+        log = logging.getLogger("red.archiver")
+
+        async def apply_overwrites(target_channel):
+            """Set overwrites one target at a time using set_permissions."""
+            # First wipe existing overwrites that aren't in new set
+            for existing_target in list(target_channel.overwrites):
+                if existing_target not in new_overwrites:
+                    try:
+                        await target_channel.set_permissions(
+                            existing_target, overwrite=None
+                        )
+                        await asyncio.sleep(0.3)
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+            # Apply each new overwrite individually
+            for perm_target, overwrite in new_overwrites.items():
+                await target_channel.set_permissions(perm_target, overwrite=overwrite)
+                await asyncio.sleep(0.3)
+
+        # Update the category itself first
         try:
-            await archive_cat.edit(overwrites=new_overwrites)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+            await apply_overwrites(archive_cat)
+        except discord.Forbidden as e:
+            log.error(f"Forbidden updating category {archive_cat.name}: {e}")
+        except discord.HTTPException as e:
+            log.error(f"HTTPException updating category {archive_cat.name}: {e}")
 
         # Update every channel inside it
         channels = list(archive_cat.channels)
         for i, channel in enumerate(channels):
             try:
-                await channel.edit(overwrites=new_overwrites, sync_permissions=False)
+                await apply_overwrites(channel)
                 synced += 1
-            except (discord.Forbidden, discord.HTTPException):
+            except discord.Forbidden as e:
                 failed += 1
+                log.error(f"Forbidden syncing #{channel.name} ({channel.id}): {e}")
+            except discord.HTTPException as e:
+                failed += 1
+                log.error(
+                    f"HTTPException syncing #{channel.name} ({channel.id}): {e.status} {e.text}"
+                )
             if i < len(channels) - 1:
-                await asyncio.sleep(0.75)
+                await asyncio.sleep(0.5)
 
         return synced, failed
 
