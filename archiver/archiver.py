@@ -4,12 +4,15 @@ Allows archiving channels and categories with full state restoration.
 """
 
 import asyncio
+import logging
 import discord
 from datetime import datetime, timezone
 from typing import Optional
 
 from redbot.core import commands, Config, checks
 from redbot.core.bot import Red
+
+log = logging.getLogger("red.archiver")
 
 CHANNEL_ICONS = {
     "text": "💬",
@@ -57,7 +60,6 @@ class Archiver(commands.Cog):
         admin_role_ids = set(await self.config.guild(guild).admin_roles())
         admin_roles = [guild.get_role(r) for r in admin_role_ids if guild.get_role(r)]
 
-        # Start by explicitly denying every role in the server
         overwrites = {}
         for role in guild.roles:
             if role in admin_roles:
@@ -222,7 +224,6 @@ class Archiver(commands.Cog):
         if not cat_id:
             return await ctx.send("❌ No archive category set.")
 
-        # Re-fetch fresh from cache
         archive_cat = ctx.guild.get_channel(cat_id)
         if not archive_cat:
             return await ctx.send("❌ Archive category not found in this server.")
@@ -255,8 +256,6 @@ class Archiver(commands.Cog):
         """
         Create a new archive category with admin-only permissions.
         If no archive category is currently set, prompts to use this one as the destination.
-
-        Example: [p]archive createcategory Old Channels
         """
         overwrites = await self._build_archive_overwrites(ctx.guild)
 
@@ -329,9 +328,7 @@ class Archiver(commands.Cog):
             for channel in channels:
                 snapshot = await self._snapshot_channel(channel)
                 items[str(channel.id)] = {"type": "channel", "snapshot": snapshot}
-                await channel.edit(category=archive_cat)
-                await asyncio.sleep(0.3)
-                await self._apply_overwrites(channel, archive_overwrites)
+                await channel.edit(category=archive_cat, overwrites=archive_overwrites)
                 moved.append(channel.mention)
                 await asyncio.sleep(0.5)
 
@@ -361,20 +358,16 @@ class Archiver(commands.Cog):
         moved = []
         failed = []
         channels = list(category.channels)
-        for i, channel in enumerate(channels):
+        for channel in channels:
             try:
-                # Step 1: move the channel into the archive category
-                await channel.edit(category=archive_cat)
-                await asyncio.sleep(0.3)
-                # Step 2: apply archive overwrites one target at a time
-                await self._apply_overwrites(channel, archive_overwrites)
+                # Move channel and apply archive overwrites in one edit call
+                await channel.edit(category=archive_cat, overwrites=archive_overwrites)
                 moved.append(channel.name)
             except discord.Forbidden:
                 failed.append(channel.name)
             except discord.HTTPException as e:
                 failed.append(f"{channel.name} ({e})")
-            if i < len(channels) - 1:
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
 
         await category.delete(reason=f"Archived by {ctx.author}")
 
@@ -429,7 +422,7 @@ class Archiver(commands.Cog):
         await ctx.send(embed=embed)
 
     # ------------------------------------------------------------------ #
-    #  archived list  (reads JSON, displays as original structure)
+    #  archived list
     # ------------------------------------------------------------------ #
 
     @commands.command(name="archived")
@@ -443,7 +436,6 @@ class Archiver(commands.Cog):
         if not items:
             return await ctx.send("📭 Nothing has been archived yet.")
 
-        # Separate categories and lone channels, sort by archived_at
         categories = sorted(
             [(k, v) for k, v in items.items() if v["type"] == "category"],
             key=lambda x: x[1]["snapshot"].get("archived_at", ""),
@@ -455,7 +447,6 @@ class Archiver(commands.Cog):
 
         embeds = []
 
-        # --- Archived categories ---
         for _key, entry in categories:
             snap = entry["snapshot"]
             ts = snap.get("archived_at", "")[:10] or "unknown date"
@@ -479,7 +470,6 @@ class Archiver(commands.Cog):
             embed.set_footer(text=f"Archived on {ts}  •  {len(children)} channel(s)")
             embeds.append(embed)
 
-        # --- Lone channels (grouped into one embed) ---
         if lone_channels:
             lines = []
             for _key, entry in lone_channels:
@@ -503,7 +493,6 @@ class Archiver(commands.Cog):
         if not embeds:
             return await ctx.send("📭 Nothing has been archived yet.")
 
-        # Send all embeds (Discord allows up to 10 per message)
         for i in range(0, len(embeds), 10):
             await ctx.send(embeds=embeds[i : i + 10])
 
@@ -560,21 +549,17 @@ class Archiver(commands.Cog):
     ) -> discord.abc.GuildChannel:
         """
         Try to move the original channel back. If it no longer exists, recreate it.
-        The snapshot stores the channel's ID so we can find it in the archive.
         """
         existing = guild.get_channel(snapshot["id"])
         if existing is not None:
-            # Channel still exists (sitting in archive) — move it back and restore perms
             await existing.edit(
                 name=snapshot["name"],
                 category=target_category,
                 position=snapshot["position"],
+                overwrites=overwrites,
             )
-            await asyncio.sleep(0.5)
-            await self._apply_overwrites(existing, overwrites)
             return existing
         else:
-            # Channel was deleted or not found — recreate from snapshot
             return await self._create_channel_from_snapshot(
                 guild, snapshot, target_category, overwrites
             )
@@ -630,16 +615,6 @@ class Archiver(commands.Cog):
         except discord.HTTPException as e:
             await ctx.send(f"❌ Failed to restore **#{snapshot['name']}**: {e}")
 
-    async def _restore_channel_to_category(
-        self,
-        guild: discord.Guild,
-        snapshot: dict,
-        category: discord.CategoryChannel,
-    ):
-        overwrites = self._deserialize_overwrites(guild, snapshot["overwrites"])
-        await self._move_or_recreate(guild, snapshot, category, overwrites)
-        await asyncio.sleep(0.75)
-
     async def _create_channel_from_snapshot(
         self,
         guild: discord.Guild,
@@ -685,18 +660,12 @@ class Archiver(commands.Cog):
     async def _apply_overwrites(
         self, channel: discord.abc.GuildChannel, overwrites: dict
     ):
-        """Apply a full set of permission overwrites to a channel using set_permissions.
-        Uses a generous delay to respect Discord's strict per-channel permission rate limit.
-        """
-        # Remove any existing overwrites not in the new set
-        for target in list(channel.overwrites):
-            if target not in overwrites:
-                await channel.set_permissions(target, overwrite=None)
-                await asyncio.sleep(5)
-        # Set each new overwrite individually
-        for target, overwrite in overwrites.items():
-            await channel.set_permissions(target, overwrite=overwrite)
-            await asyncio.sleep(5)
+        """Apply a full set of permission overwrites in a single API call."""
+        try:
+            await channel.edit(overwrites=overwrites)
+        except discord.HTTPException:
+            await asyncio.sleep(2)
+            await channel.edit(overwrites=overwrites)
 
     async def _sync_archive_permissions(self, guild: discord.Guild):
         """Apply current admin role overwrites to every channel in the archive category.
@@ -712,23 +681,18 @@ class Archiver(commands.Cog):
         synced = 0
         failed = 0
 
-        import logging
-
-        log = logging.getLogger("red.archiver")
-
         # Update the category itself first
         try:
-            await self._apply_overwrites(archive_cat, new_overwrites)
+            await archive_cat.edit(overwrites=new_overwrites)
         except discord.Forbidden as e:
             log.error(f"Forbidden updating category {archive_cat.name}: {e}")
         except discord.HTTPException as e:
             log.error(f"HTTPException updating category {archive_cat.name}: {e}")
 
         # Update every channel inside it
-        channels = list(archive_cat.channels)
-        for i, channel in enumerate(channels):
+        for channel in archive_cat.channels:
             try:
-                await self._apply_overwrites(channel, new_overwrites)
+                await channel.edit(overwrites=new_overwrites)
                 synced += 1
             except discord.Forbidden as e:
                 failed += 1
@@ -738,8 +702,7 @@ class Archiver(commands.Cog):
                 log.error(
                     f"HTTPException syncing #{channel.name} ({channel.id}): {e.status} {e.text}"
                 )
-            if i < len(channels) - 1:
-                await asyncio.sleep(2)
+            await asyncio.sleep(0.5)
 
         return synced, failed
 
