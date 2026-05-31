@@ -3,6 +3,7 @@ Archiver Cog for Red-DiscordBot
 Allows archiving channels and categories with full state restoration.
 """
 
+import asyncio
 import discord
 from datetime import datetime, timezone
 from typing import Optional
@@ -306,15 +307,23 @@ class Archiver(commands.Cog):
 
         moved = []
         failed = []
-        for channel in list(category.channels):
+        channels = list(category.channels)
+        for i, channel in enumerate(channels):
             try:
-                await channel.edit(category=archive_cat, sync_permissions=False)
-                await channel.edit(overwrites=archive_overwrites)
+                # Combine move + permission overwrite into a single API call
+                await channel.edit(
+                    category=archive_cat,
+                    overwrites=archive_overwrites,
+                    sync_permissions=False,
+                )
                 moved.append(channel.name)
             except discord.Forbidden:
                 failed.append(channel.name)
             except discord.HTTPException as e:
                 failed.append(f"{channel.name} ({e})")
+            # Small delay between channels to avoid rate limits
+            if i < len(channels) - 1:
+                await asyncio.sleep(0.75)
 
         await category.delete(reason=f"Archived by {ctx.author}")
 
@@ -548,6 +557,7 @@ class Archiver(commands.Cog):
     ):
         overwrites = self._deserialize_overwrites(guild, snapshot["overwrites"])
         await self._create_channel_from_snapshot(guild, snapshot, category, overwrites)
+        await asyncio.sleep(0.75)
 
     async def _create_channel_from_snapshot(
         self,
