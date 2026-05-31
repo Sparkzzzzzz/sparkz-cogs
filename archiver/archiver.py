@@ -655,16 +655,18 @@ class Archiver(commands.Cog):
     async def _apply_overwrites(
         self, channel: discord.abc.GuildChannel, overwrites: dict
     ):
-        """Apply a full set of permission overwrites to a channel using set_permissions."""
+        """Apply a full set of permission overwrites to a channel using set_permissions.
+        Uses a generous delay to respect Discord's strict per-channel permission rate limit.
+        """
         # Remove any existing overwrites not in the new set
         for target in list(channel.overwrites):
             if target not in overwrites:
                 await channel.set_permissions(target, overwrite=None)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(5)
         # Set each new overwrite individually
         for target, overwrite in overwrites.items():
             await channel.set_permissions(target, overwrite=overwrite)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(5)
 
     async def _sync_archive_permissions(self, guild: discord.Guild):
         """Apply current admin role overwrites to every channel in the archive category.
@@ -707,7 +709,7 @@ class Archiver(commands.Cog):
                     f"HTTPException syncing #{channel.name} ({channel.id}): {e.status} {e.text}"
                 )
             if i < len(channels) - 1:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(2)
 
         return synced, failed
 
