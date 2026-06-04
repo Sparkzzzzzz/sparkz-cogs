@@ -167,6 +167,8 @@ class ReactionRoles(commands.Cog):
         await ctx.send("Send `Title | Description`")
         while True:
             msg = await self.bot.wait_for("message", check=check)
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
             if "|" in msg.content:
                 title, description = [x.strip() for x in msg.content.split("|", 1)]
                 break
@@ -176,6 +178,8 @@ class ReactionRoles(commands.Cog):
         await ctx.send("Send hex color or `none`")
         while True:
             msg = await self.bot.wait_for("message", check=check)
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
             if msg.content.lower() == "none":
                 color = discord.Color.blurple()
                 break
@@ -188,26 +192,35 @@ class ReactionRoles(commands.Cog):
         await ctx.send("Type: button / dropdown / react")
         while True:
             msg = await self.bot.wait_for("message", check=check)
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
             mode = msg.content.lower()
             if mode in ["button", "dropdown", "react"]:
                 break
+            await ctx.send("Invalid mode. Choose: button / dropdown / react")
 
+        # Unique
         unique = False
-        if mode in ["button", "dropdown", "react"]:
-            await ctx.send("Unique mode? (yes/no)")
-            while True:
-                msg = await self.bot.wait_for("message", check=check)
-                if msg.content.lower() in ["yes", "y"]:
-                    unique = True
-                    break
-                if msg.content.lower() in ["no", "n"]:
-                    break
+        await ctx.send("Unique mode? (yes/no)")
+        while True:
+            msg = await self.bot.wait_for("message", check=check)
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if msg.content.lower() in ["yes", "y"]:
+                unique = True
+                break
+            if msg.content.lower() in ["no", "n"]:
+                break
+            await ctx.send("Please answer yes or no.")
 
         # Roles
         roles = {}
         await ctx.send("Add roles: `emoji @Role` then type `done`")
         while True:
             msg = await self.bot.wait_for("message", check=check)
+
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
 
             if msg.content.lower() == "done":
                 if roles:
@@ -370,4 +383,3 @@ class ReactionRoles(commands.Cog):
             del panels[str(message_id)]
 
         await ctx.send("Panel deleted and message removed.")
-
