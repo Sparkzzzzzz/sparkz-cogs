@@ -66,7 +66,7 @@ class ReactionRoles(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=7788990011)
         self.config.register_guild(panels={})
-        self._active_sessions: set[int] = set()
+        self._active_tasks: dict[int, asyncio.Task] = {}
 
     async def cog_load(self):
         all_data = await self.config.all_guilds()
@@ -78,7 +78,9 @@ class ReactionRoles(commands.Cog):
                     self.bot.add_view(view)
 
     async def cog_unload(self):
-        self._active_sessions.clear()
+        for task in self._active_tasks.values():
+            task.cancel()
+        self._active_tasks.clear()
 
     async def get_panel(self, guild_id: int, message_id: int):
         panels = await self.config.guild_from_id(guild_id).panels()
@@ -151,18 +153,22 @@ class ReactionRoles(commands.Cog):
     @rr.command()
     @commands.admin_or_permissions(manage_roles=True)
     async def make(self, ctx):
-
-        if ctx.author.id in self._active_sessions:
+        if ctx.author.id in self._active_tasks:
             return await ctx.send("You already have a setup in progress.")
 
-        self._active_sessions.add(ctx.author.id)
+        task = asyncio.ensure_future(self._make_session(ctx))
+        self._active_tasks[ctx.author.id] = task
 
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._active_tasks.pop(ctx.author.id, None)
+
+    async def _make_session(self, ctx):
         def check(m):
-            return (
-                m.author == ctx.author
-                and m.channel == ctx.channel
-                and ctx.author.id in self._active_sessions
-            )
+            return m.author == ctx.author and m.channel == ctx.channel
 
         async def get_input():
             try:
@@ -171,108 +177,102 @@ class ReactionRoles(commands.Cog):
                 await ctx.send("Setup timed out.")
                 return None
 
-        try:
-            await ctx.send("Reaction Role Setup Started. Type `cancel` anytime.")
+        await ctx.send("Reaction Role Setup Started. Type `cancel` anytime.")
 
-            # Channel
-            await ctx.send("Mention channel.")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                if msg.channel_mentions:
-                    channel = msg.channel_mentions[0]
-                    break
-                await ctx.send("Mention a valid channel.")
+        # Channel
+        await ctx.send("Mention channel.")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if msg.channel_mentions:
+                channel = msg.channel_mentions[0]
+                break
+            await ctx.send("Mention a valid channel.")
 
-            # Title/Desc
-            await ctx.send("Send `Title | Description`")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                if "|" in msg.content:
-                    title, description = [x.strip() for x in msg.content.split("|", 1)]
-                    break
-                await ctx.send("Invalid format. Use `Title | Description`")
+        # Title/Desc
+        await ctx.send("Send `Title | Description`")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if "|" in msg.content:
+                title, description = [x.strip() for x in msg.content.split("|", 1)]
+                break
+            await ctx.send("Invalid format. Use `Title | Description`")
 
-            # Color
-            await ctx.send("Send hex color or `none`")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                if msg.content.lower() == "none":
-                    color = discord.Color.blurple()
-                    break
-                if HEX_REGEX.match(msg.content):
-                    color = discord.Color(int(msg.content.replace("#", ""), 16))
-                    break
-                await ctx.send(
-                    "Invalid hex. Try something like `#ff0000` or type `none`."
-                )
+        # Color
+        await ctx.send("Send hex color or `none`")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if msg.content.lower() == "none":
+                color = discord.Color.blurple()
+                break
+            if HEX_REGEX.match(msg.content):
+                color = discord.Color(int(msg.content.replace("#", ""), 16))
+                break
+            await ctx.send("Invalid hex. Try something like `#ff0000` or type `none`.")
 
-            # Mode
-            await ctx.send("Type: button / dropdown / react")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                mode = msg.content.lower()
-                if mode in ["button", "dropdown", "react"]:
-                    break
-                await ctx.send("Invalid mode. Choose: button / dropdown / react")
+        # Mode
+        await ctx.send("Type: button / dropdown / react")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            mode = msg.content.lower()
+            if mode in ["button", "dropdown", "react"]:
+                break
+            await ctx.send("Invalid mode. Choose: button / dropdown / react")
 
-            # Unique
-            unique = False
-            await ctx.send("Unique mode? (yes/no)")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                if msg.content.lower() in ["yes", "y"]:
-                    unique = True
-                    break
-                if msg.content.lower() in ["no", "n"]:
-                    break
-                await ctx.send("Please answer yes or no.")
+        # Unique
+        unique = False
+        await ctx.send("Unique mode? (yes/no)")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if msg.content.lower() in ["yes", "y"]:
+                unique = True
+                break
+            if msg.content.lower() in ["no", "n"]:
+                break
+            await ctx.send("Please answer yes or no.")
 
-            # Roles
-            roles = {}
-            await ctx.send("Add roles: `emoji @Role` then type `done`")
-            while True:
-                msg = await get_input()
-                if msg is None:
-                    return
-                if msg.content.lower() == "cancel":
-                    return await ctx.send("Cancelled.")
-                if msg.content.lower() == "done":
-                    if roles:
-                        break
-                    await ctx.send("Add at least one role.")
-                    continue
-                if not msg.role_mentions:
-                    continue
-                emoji = msg.content.split()[0]
-                role = msg.role_mentions[0]
-                roles[str(role.id)] = {
-                    "emoji": emoji,
-                    "label": role.name,
-                }
-                await msg.add_reaction("✅")
-
-        finally:
-            self._active_sessions.discard(ctx.author.id)
+        # Roles
+        roles = {}
+        await ctx.send("Add roles: `emoji @Role` then type `done`")
+        while True:
+            msg = await get_input()
+            if msg is None:
+                return
+            if msg.content.lower() == "cancel":
+                return await ctx.send("Cancelled.")
+            if msg.content.lower() == "done":
+                if roles:
+                    break
+                await ctx.send("Add at least one role.")
+                continue
+            if not msg.role_mentions:
+                continue
+            emoji = msg.content.split()[0]
+            role = msg.role_mentions[0]
+            roles[str(role.id)] = {
+                "emoji": emoji,
+                "label": role.name,
+            }
+            await msg.add_reaction("✅")
 
         if "{roles}" in description:
             role_lines = "\n".join(
