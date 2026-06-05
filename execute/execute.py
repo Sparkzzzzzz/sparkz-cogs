@@ -4,6 +4,44 @@ from redbot.core import commands
 from redbot.core.bot import Red
 
 
+def resolve_command(bot: Red, content: str, prefix: str):
+    """
+    Walk the command tree (including aliases) to resolve a full command string.
+    Returns the resolved command string with canonical names, or None if not found.
+    
+    This fixes the issue where aliases of subcommand groups (e.g. 'rts' -> 
+    'reacticket settings') are not resolved by get_context alone.
+    """
+    # Strip prefix
+    if not content.startswith(prefix):
+        return content  # already handled upstream
+    rest = content[len(prefix):]
+    parts = rest.split()
+    if not parts:
+        return content
+
+    # Walk top-level commands
+    cmd = bot.all_commands.get(parts[0])
+    if cmd is None:
+        return content  # let get_context handle the "not found"
+
+    resolved_parts = [cmd.name]
+    remaining = parts[1:]
+
+    # Walk subcommands, resolving aliases at each level
+    while remaining and isinstance(cmd, commands.Group):
+        sub = cmd.all_commands.get(remaining[0])
+        if sub is None:
+            break
+        resolved_parts.append(sub.name)
+        cmd = sub
+        remaining = remaining[1:]
+
+    # Reconstruct: prefix + resolved command path + remaining args
+    resolved = prefix + " ".join(resolved_parts + remaining)
+    return resolved
+
+
 class Execute(commands.Cog):
     """Execute multiple bot commands at once from a code block."""
 
@@ -65,17 +103,17 @@ class Execute(commands.Cog):
             if matched_prefix is None:
                 # Likely a foreign bot prefix
                 if line and not line[0].isalnum():
-                    errors.append(
-                        (line, "Command uses a foreign/unknown prefix — skipped.")
-                    )
+                    errors.append((line, "Command uses a foreign/unknown prefix — skipped."))
                     continue
                 full_command = f"{bot_prefixes[0]}{line}"
+                matched_prefix = bot_prefixes[0]
             else:
                 full_command = line
 
             try:
-                # copy.copy gives a shallow copy of the Message object
-                # then we just override .content — works without touching internals
+                # Resolve aliases throughout the command tree before invoking
+                full_command = resolve_command(self.bot, full_command, matched_prefix)
+
                 new_msg = copy.copy(ctx.message)
                 new_msg.content = full_command
 
@@ -101,9 +139,7 @@ class Execute(commands.Cog):
             except Exception as e:
                 errors.append((line, f"Exception: {e}"))
 
-        lines_out = [
-            f"✅ **{success_count}/{len(lines)} command(s) executed successfully.**"
-        ]
+        lines_out = [f"✅ **{success_count}/{len(lines)} command(s) executed successfully.**"]
 
         if errors:
             lines_out.append(f"\n⚠️ **{len(errors)} issue(s):**")
@@ -115,9 +151,7 @@ class Execute(commands.Cog):
         if len(report) <= 2000:
             await status_msg.edit(content=report)
         else:
-            await status_msg.edit(
-                content=f"✅ {success_count}/{len(lines)} succeeded. Errors below:"
-            )
+            await status_msg.edit(content=f"✅ {success_count}/{len(lines)} succeeded. Errors below:")
             chunk = []
             for cmd_line, reason in errors:
                 chunk.append(f"• `{cmd_line}` — {reason}")
