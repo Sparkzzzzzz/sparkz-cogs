@@ -1,7 +1,7 @@
+import copy
 import discord
 from redbot.core import commands
 from redbot.core.bot import Red
-import traceback
 
 
 class Execute(commands.Cog):
@@ -22,20 +22,12 @@ class Execute(commands.Cog):
         help
         say hi
         welcomeset channel #general
-        d?say hi
         ```
-
-        - Lines without a prefix use the bot's current prefix.
-        - Lines with a different prefix (e.g. d?) are sent as-is and treated as foreign bot commands (they'll be noted as unexecutable).
-        - Errors and unknown commands are reported at the end.
         """
-        # Extract content from code block if present
         raw = ctx.message.content
 
-        # Find the code block in the original message
         if "```" in raw:
             start = raw.find("```") + 3
-            # Skip language tag if present (e.g. ```python)
             if raw[start] != "\n":
                 start = raw.find("\n", start) + 1
             end = raw.rfind("```")
@@ -55,7 +47,6 @@ class Execute(commands.Cog):
             await ctx.send("No commands found in the code block.")
             return
 
-        # Get all valid prefixes for this guild
         bot_prefixes = await self.bot.get_valid_prefixes(ctx.guild)
 
         errors = []
@@ -64,7 +55,7 @@ class Execute(commands.Cog):
         status_msg = await ctx.send(f"⏳ Executing `{len(lines)}` command(s)...")
 
         for line in lines:
-            # Determine if line starts with a known bot prefix
+            # Check if line starts with a known bot prefix
             matched_prefix = None
             for prefix in sorted(bot_prefixes, key=len, reverse=True):
                 if line.startswith(prefix):
@@ -72,26 +63,20 @@ class Execute(commands.Cog):
                     break
 
             if matched_prefix is None:
-                # Check if it starts with any prefix-like character that isn't ours
-                # Heuristic: if starts with a non-alphanumeric char that's not our prefix, it's foreign
-                if line[0] in "!?$%^&./\\;,~@#" or (len(line) > 1 and line[1] in "?!"):
+                # Likely a foreign bot prefix
+                if line and not line[0].isalnum():
                     errors.append(
                         (line, "Command uses a foreign/unknown prefix — skipped.")
                     )
                     continue
-                # Otherwise treat as a command without prefix
                 full_command = f"{bot_prefixes[0]}{line}"
             else:
                 full_command = line
 
-            # Build a fake message to invoke the command
-            fake_message = ctx.message
-            # We'll use copy context trick
             try:
-                msg = ctx.message
-                # Create a new Message-like object by monkeypatching content
-                new_msg = discord.Message.__new__(discord.Message)
-                new_msg.__dict__.update(msg.__dict__)
+                # copy.copy gives a shallow copy of the Message object
+                # then we just override .content — works without touching internals
+                new_msg = copy.copy(ctx.message)
                 new_msg.content = full_command
 
                 new_ctx = await self.bot.get_context(new_msg)
@@ -100,11 +85,8 @@ class Execute(commands.Cog):
                     errors.append((line, "Command not found."))
                     continue
 
-                # Check if bot can run the command (basic checks)
                 try:
-                    can_run = await new_ctx.command.can_run(
-                        new_ctx, check_all_parents=True
-                    )
+                    await new_ctx.command.can_run(new_ctx, check_all_parents=True)
                 except commands.CommandError as e:
                     errors.append((line, f"Permission check failed: {e}"))
                     continue
@@ -117,10 +99,8 @@ class Execute(commands.Cog):
                     success_count += 1
 
             except Exception as e:
-                tb = traceback.format_exc()
                 errors.append((line, f"Exception: {e}"))
 
-        # Build result report
         lines_out = [
             f"✅ **{success_count}/{len(lines)} command(s) executed successfully.**"
         ]
@@ -132,14 +112,12 @@ class Execute(commands.Cog):
 
         report = "\n".join(lines_out)
 
-        # Edit or send depending on length
         if len(report) <= 2000:
             await status_msg.edit(content=report)
         else:
             await status_msg.edit(
                 content=f"✅ {success_count}/{len(lines)} succeeded. Errors below:"
             )
-            # Chunk errors
             chunk = []
             for cmd_line, reason in errors:
                 chunk.append(f"• `{cmd_line}` — {reason}")
