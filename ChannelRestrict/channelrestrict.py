@@ -1,3 +1,5 @@
+import time
+
 import discord
 from redbot.core import commands, Config
 from redbot.core.bot import Red
@@ -17,6 +19,7 @@ class ChannelRestrict(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
+        self._recent_notices = {}
         self.config = Config.get_conf(
             self, identifier=9847362154, force_registration=True
         )
@@ -146,6 +149,16 @@ class ChannelRestrict(commands.Cog):
             return True
 
         # Block, and notify the user.
+        # Red can run global checks more than once for a single invocation
+        # (e.g. once for the command, once for help-related checks), so
+        # dedupe to avoid sending the notice multiple times.
+        key = (ctx.author.id, ctx.channel.id)
+        now = time.monotonic()
+        last = self._recent_notices.get(key, 0)
+        if now - last < 5:
+            return False
+        self._recent_notices[key] = now
+
         channel = ctx.guild.get_channel(conf["channel_id"])
         location = channel.mention if channel else "the designated bot channel"
         notice = f"{ctx.author.mention} You can't use bot commands here. Please head to {location}."
