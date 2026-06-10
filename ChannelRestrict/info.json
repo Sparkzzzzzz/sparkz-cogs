@@ -1,0 +1,8 @@
+{
+    "author": ["Sparkz"],
+    "name": "ChannelRestrict",
+    "short": "Restrict bot command usage to a single channel unless user has a whitelisted role",
+    "description": "Restricts all bot commands to a single configured channel. Users without a whitelisted role get an ephemeral message redirecting them to the allowed channel when they try to use commands elsewhere.",
+    "min_bot_version": "3.5.0",
+    "tags": ["moderation", "utility", "channel"]
+}
