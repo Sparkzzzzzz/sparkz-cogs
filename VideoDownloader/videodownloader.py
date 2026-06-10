@@ -24,12 +24,17 @@ class VideoDownloader(commands.Cog):
             self, identifier=9876543210, force_registration=True
         )
         default_guild = {
-            "enabled_channels": [],  # Empty = all channels; list of IDs = only those channels
+            "enabled_channels": [],
             "enabled": True,
-            "max_filesize_mb": 25,  # Discord's default free upload limit
+            "max_filesize_mb": 25,
             "delete_original_message": False,
         }
+        default_global = {
+            "cookies_file": "",  # Path to cookies.txt for Instagram auth
+            "ffmpeg_location": "",  # Path to ffmpeg if not in system PATH
+        }
         self.config.register_guild(**default_guild)
+        self.config.register_global(**default_global)
 
     # ──────────────────────────────────────────────
     # Admin commands
@@ -122,6 +127,30 @@ class VideoDownloader(commands.Cog):
         embed.add_field(name="Watched Channels", value=ch_str, inline=False)
         await ctx.send(embed=embed)
 
+    @vdl.command(name="setcookies")
+    @commands.is_owner()
+    async def vdl_setcookies(self, ctx: commands.Context, path: str):
+        """(Bot owner only) Set the path to your cookies.txt file for Instagram auth.
+
+        Example: [p]vdl setcookies C:\\cookies\\instagram_cookies.txt
+        """
+        if not os.path.isfile(path):
+            return await ctx.send(f"❌ File not found: `{path}`")
+        await self.config.cookies_file.set(path)
+        await ctx.send(f"✅ Cookies file set to `{path}`")
+
+    @vdl.command(name="setffmpeg")
+    @commands.is_owner()
+    async def vdl_setffmpeg(self, ctx: commands.Context, path: str):
+        """(Bot owner only) Set the path to ffmpeg if it's not in your system PATH.
+
+        Example: [p]vdl setffmpeg C:\\ffmpeg\\bin\\ffmpeg.exe
+        """
+        if not os.path.isfile(path):
+            return await ctx.send(f"❌ File not found: `{path}`")
+        await self.config.ffmpeg_location.set(path)
+        await ctx.send(f"✅ ffmpeg location set to `{path}`")
+
     # ──────────────────────────────────────────────
     # Listener
     # ──────────────────────────────────────────────
@@ -150,19 +179,27 @@ class VideoDownloader(commands.Cog):
         url = match.group(0)
 
         # Download and repost
-        await self._handle_video(message, url, cfg)
+        global_cfg = await self.config.all()
+        await self._handle_video(message, url, cfg, global_cfg)
 
     # ──────────────────────────────────────────────
     # Core download logic
     # ──────────────────────────────────────────────
 
-    async def _handle_video(self, message: discord.Message, url: str, cfg: dict):
+    async def _handle_video(
+        self, message: discord.Message, url: str, cfg: dict, global_cfg: dict
+    ):
         max_bytes = cfg["max_filesize_mb"] * 1024 * 1024
 
         async with message.channel.typing():
             try:
                 video_path, title = await asyncio.get_event_loop().run_in_executor(
-                    None, self._download_video, url, max_bytes
+                    None,
+                    self._download_video,
+                    url,
+                    max_bytes,
+                    global_cfg.get("cookies_file", ""),
+                    global_cfg.get("ffmpeg_location", ""),
                 )
             except FileTooLargeError as e:
                 await message.reply(
@@ -206,7 +243,13 @@ class VideoDownloader(commands.Cog):
                 except OSError:
                     pass
 
-    def _download_video(self, url: str, max_bytes: int) -> tuple[str, str]:
+    def _download_video(
+        self,
+        url: str,
+        max_bytes: int,
+        cookies_file: str = "",
+        ffmpeg_location: str = "",
+    ) -> tuple[str, str]:
         """Synchronous yt-dlp download. Returns (filepath, title)."""
         tmp_dir = tempfile.mkdtemp()
         output_template = os.path.join(tmp_dir, "%(title).50s.%(ext)s")
@@ -218,9 +261,28 @@ class VideoDownloader(commands.Cog):
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            # Stop download if file would be too large (rough check)
             "max_filesize": max_bytes,
+            # Spoof a real browser to bypass Instagram's login wall for public reels
+            "http_headers": {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "*/*",
+                "Referer": "https://www.instagram.com/",
+            },
+            # Retry on transient failures
+            "retries": 3,
+            "fragment_retries": 3,
         }
+
+        if cookies_file and os.path.isfile(cookies_file):
+            ydl_opts["cookiefile"] = cookies_file
+
+        if ffmpeg_location and os.path.isfile(ffmpeg_location):
+            ydl_opts["ffmpeg_location"] = str(Path(ffmpeg_location).parent)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
