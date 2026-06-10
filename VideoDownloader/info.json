@@ -1,0 +1,11 @@
+{
+    "name": "VideoDownloader",
+    "short": "Auto-downloads and reposts Instagram & Twitter/X videos.",
+    "description": "Listens for Instagram and Twitter/X links in configured channels, downloads the video using yt-dlp, and reposts it as a Discord upload with attribution.",
+    "version": "1.0.0",
+    "author": ["YourName"],
+    "install_msg": "Thanks for installing VideoDownloader! Run `[p]vdl settings` to get started. Make sure yt-dlp is installed: `pip install yt-dlp`",
+    "required_cogs": {},
+    "requirements": ["yt-dlp"],
+    "tags": ["video", "instagram", "twitter", "media", "downloader"]
+}
