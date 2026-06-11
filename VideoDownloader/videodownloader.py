@@ -31,8 +31,8 @@ class VideoDownloader(commands.Cog):
             "delete_original_message": False,
         }
         default_global = {
-            "ffmpeg_location": "",  # Path to ffmpeg if not in system PATH
-            "rapidapi_key": "",  # RapidAPI key for Instagram fallback
+            "ffmpeg_location": "",
+            "rapidapi_key": "",
         }
         self.config.register_guild(**default_guild)
         self.config.register_global(**default_global)
@@ -130,9 +130,9 @@ class VideoDownloader(commands.Cog):
         embed.add_field(
             name="Instagram Method",
             value=(
-                "ddinstagram proxy → RapidAPI fallback"
+                "yt-dlp direct → RapidAPI fallback"
                 if global_cfg.get("rapidapi_key")
-                else "ddinstagram proxy only (no RapidAPI key set)"
+                else "yt-dlp direct only (no RapidAPI key set)"
             ),
             inline=False,
         )
@@ -153,13 +153,13 @@ class VideoDownloader(commands.Cog):
     @vdl.command(name="setrapidapi")
     @commands.is_owner()
     async def vdl_setrapidapi(self, ctx: commands.Context, key: str):
-        """(Bot owner only) Set a RapidAPI key used as fallback if the proxy fails.
+        """(Bot owner only) Set a RapidAPI key used as fallback if yt-dlp fails.
 
         Get a free key at https://rapidapi.com — search for 'instagram downloader'.
         """
         await self.config.rapidapi_key.set(key)
         await ctx.send(
-            "✅ RapidAPI key saved. It will be used as a fallback if the proxy fails."
+            "✅ RapidAPI key saved. It will be used as a fallback if yt-dlp fails."
         )
 
     # ──────────────────────────────────────────────
@@ -190,7 +190,9 @@ class VideoDownloader(commands.Cog):
         url = match.group(0)
 
         global_cfg = await self.config.all()
-        await self._handle_video(message, url, cfg, global_cfg)
+
+        # Fire and forget — don't await so the response feels instant
+        asyncio.create_task(self._handle_video(message, url, cfg, global_cfg))
 
     # ──────────────────────────────────────────────
     # Core download logic
@@ -202,97 +204,78 @@ class VideoDownloader(commands.Cog):
         max_bytes = cfg["max_filesize_mb"] * 1024 * 1024
         is_instagram = "instagram.com" in url
 
-        async with message.channel.typing():
+        video_path = None
+        title = "Video"
+        last_error = None
+
+        # ── Strategy 1: yt-dlp direct (works for both Instagram and Twitter/X) ──
+        try:
+            video_path, title = await asyncio.get_event_loop().run_in_executor(
+                None,
+                self._download_video,
+                url,
+                max_bytes,
+                global_cfg.get("ffmpeg_location", ""),
+            )
+        except FileTooLargeError:
+            raise
+        except Exception as e:
+            last_error = e
             video_path = None
-            title = "Video"
-            last_error = None
 
-            # ── Strategy 1: ddinstagram proxy (Instagram only) ──
-            if is_instagram:
-                try:
-                    proxy_url = self._proxy_instagram_url(url)
-                    video_path, title = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        self._download_video,
-                        proxy_url,
-                        max_bytes,
-                        global_cfg.get("ffmpeg_location", ""),
-                    )
-                except FileTooLargeError:
-                    raise  # Don't bother falling back if file is just too big
-                except Exception as e:
-                    last_error = e
-                    video_path = None  # Fall through to next strategy
+        # ── Strategy 2: RapidAPI fallback (Instagram only) ──
+        if video_path is None and is_instagram and global_cfg.get("rapidapi_key"):
+            try:
+                tmp_dir = tempfile.mkdtemp()
+                video_path, title = await self._download_via_rapidapi(
+                    url, tmp_dir, global_cfg["rapidapi_key"], max_bytes
+                )
+            except FileTooLargeError:
+                raise
+            except Exception as e:
+                last_error = e
+                video_path = None
 
-            # ── Strategy 2: yt-dlp direct (Twitter/X, or Instagram proxy failed) ──
-            if video_path is None and not is_instagram:
-                try:
-                    video_path, title = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        self._download_video,
-                        url,
-                        max_bytes,
-                        global_cfg.get("ffmpeg_location", ""),
-                    )
-                except FileTooLargeError:
-                    raise
-                except Exception as e:
-                    last_error = e
-                    video_path = None
+        # ── All strategies failed ──
+        if video_path is None:
+            await message.reply(
+                f"❌ Could not download video: `{type(last_error).__name__}: {last_error}`",
+                delete_after=15,
+                mention_author=False,
+            )
+            return
 
-            # ── Strategy 3: RapidAPI fallback (Instagram only, if proxy failed) ──
-            if video_path is None and is_instagram and global_cfg.get("rapidapi_key"):
-                try:
-                    tmp_dir = tempfile.mkdtemp()
-                    video_path, title = await self._download_via_rapidapi(
-                        url, tmp_dir, global_cfg["rapidapi_key"], max_bytes
-                    )
-                except FileTooLargeError:
-                    raise
-                except Exception as e:
-                    last_error = e
-                    video_path = None
-
-            # ── All strategies failed ──
-            if video_path is None:
+        # ── Upload to Discord ──
+        try:
+            file_size = os.path.getsize(video_path)
+            if file_size > max_bytes:
                 await message.reply(
-                    f"❌ Could not download video: `{type(last_error).__name__}: {last_error}`",
+                    f"⚠️ Video is too large to upload ({file_size / 1024 / 1024:.1f} MB > {cfg['max_filesize_mb']} MB).",
                     delete_after=15,
                     mention_author=False,
                 )
                 return
 
-            # ── Upload to Discord ──
-            try:
-                file_size = os.path.getsize(video_path)
-                if file_size > max_bytes:
-                    await message.reply(
-                        f"⚠️ Video is too large to upload ({file_size / 1024 / 1024:.1f} MB > {cfg['max_filesize_mb']} MB).",
-                        delete_after=15,
-                        mention_author=False,
-                    )
-                    return
+            platform = self._detect_platform(url)
+            caption = f"📹 **{title}** — via **{platform}**"
 
-                platform = self._detect_platform(url)
-                caption = f"📹 **{title}** — via **{platform}**"
+            await message.reply(
+                caption,
+                file=discord.File(video_path, filename=Path(video_path).name),
+                mention_author=False,
+            )
 
-                await message.reply(
-                    caption,
-                    file=discord.File(video_path, filename=Path(video_path).name),
-                    mention_author=False,
-                )
-
-                if cfg["delete_original_message"]:
-                    try:
-                        await message.delete()
-                    except discord.Forbidden:
-                        pass
-
-            finally:
+            if cfg["delete_original_message"]:
                 try:
-                    os.remove(video_path)
-                except OSError:
+                    await message.delete()
+                except discord.Forbidden:
                     pass
+
+        finally:
+            try:
+                os.remove(video_path)
+            except OSError:
+                pass
 
     # ──────────────────────────────────────────────
     # Download strategies
@@ -362,8 +345,6 @@ class VideoDownloader(commands.Cog):
                     raise RuntimeError(f"RapidAPI returned HTTP {resp.status}")
                 data = await resp.json()
 
-            # The field name varies slightly between RapidAPI Instagram providers;
-            # try the most common ones in order.
             video_url = (
                 data.get("media")
                 or data.get("url")
@@ -381,7 +362,6 @@ class VideoDownloader(commands.Cog):
 
             title = data.get("title") or data.get("caption") or "Instagram Video"
 
-            # Stream the video file
             async with session.get(video_url) as video_resp:
                 if video_resp.status != 200:
                     raise RuntimeError(
@@ -401,12 +381,6 @@ class VideoDownloader(commands.Cog):
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
-
-    @staticmethod
-    def _proxy_instagram_url(url: str) -> str:
-        """Rewrite instagram.com to ddinstagram.com — a public proxy that
-        serves Instagram reels/posts without requiring login."""
-        return re.sub(r"(www\.)?instagram\.com", "ddinstagram.com", url)
 
     @staticmethod
     def _detect_platform(url: str) -> str:
