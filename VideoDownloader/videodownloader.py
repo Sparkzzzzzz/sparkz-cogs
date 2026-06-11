@@ -335,7 +335,7 @@ class VideoDownloader(commands.Cog):
 
         ydl_opts = {
             "outtmpl": output_template,
-            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "format": "bestvideo*+bestaudio/best",
             "merge_output_format": "mp4",
             "quiet": True,
             "no_warnings": True,
