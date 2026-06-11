@@ -9,9 +9,9 @@ import asyncio
 import aiohttp
 from pathlib import Path
 
-# Regex to detect Instagram and Twitter/X links
+# Regex to detect Instagram, Twitter/X, and TikTok links
 LINK_PATTERN = re.compile(
-    r"https?://(www\.)?(instagram\.com/(reel|p|tv)/|twitter\.com/\S+/status/|x\.com/\S+/status/)\S+",
+    r"https?://(www\.|vm\.|vt\.|m\.)?(instagram\.com/(reel|p|tv)/|twitter\.com/\S+/status/|x\.com/\S+/status/|tiktok\.com/\S+|tiktok\.com/t/\S+)\S+",
     re.IGNORECASE,
 )
 
@@ -433,6 +433,8 @@ class VideoDownloader(commands.Cog):
             return "Instagram"
         if "twitter.com" in url or "x.com" in url:
             return "Twitter / X"
+        if "tiktok.com" in url:
+            return "TikTok"
         return "Unknown"
 
 
