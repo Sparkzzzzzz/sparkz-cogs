@@ -33,6 +33,7 @@ class VideoDownloader(commands.Cog):
         default_global = {
             "ffmpeg_location": "",
             "rapidapi_key": "",
+            "cookies_file": "",
         }
         self.config.register_guild(**default_guild)
         self.config.register_global(**default_global)
@@ -130,9 +131,26 @@ class VideoDownloader(commands.Cog):
         embed.add_field(
             name="Instagram Method",
             value=(
-                "yt-dlp direct → RapidAPI fallback"
-                if global_cfg.get("rapidapi_key")
-                else "yt-dlp direct only (no RapidAPI key set)"
+                "yt-dlp direct (with cookies) → RapidAPI fallback"
+                if global_cfg.get("rapidapi_key") and global_cfg.get("cookies_file")
+                else (
+                    "yt-dlp direct (with cookies)"
+                    if global_cfg.get("cookies_file")
+                    else (
+                        "yt-dlp direct → RapidAPI fallback"
+                        if global_cfg.get("rapidapi_key")
+                        else "yt-dlp direct only (no cookies or RapidAPI key set)"
+                    )
+                )
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Cookies File",
+            value=(
+                f"`{global_cfg['cookies_file']}`"
+                if global_cfg.get("cookies_file")
+                else "Not set"
             ),
             inline=False,
         )
@@ -161,6 +179,28 @@ class VideoDownloader(commands.Cog):
         await ctx.send(
             "✅ RapidAPI key saved. It will be used as a fallback if yt-dlp fails."
         )
+
+    @vdl.command(name="setcookies")
+    @commands.is_owner()
+    async def vdl_setcookies(self, ctx: commands.Context, path: str):
+        """(Bot owner only) Set the path to a Netscape-format cookies.txt file for Instagram.
+
+        Example: [p]vdl setcookies /home/ubuntu/RedBot/instaburnerlogin.txt
+
+        Export cookies using a browser extension like "Get cookies.txt LOCALLY"
+        while logged into a (preferably burner) Instagram account.
+        """
+        if not os.path.isfile(path):
+            return await ctx.send(f"❌ File not found: `{path}`")
+        await self.config.cookies_file.set(path)
+        await ctx.send(f"✅ Cookies file set to `{path}`")
+
+    @vdl.command(name="clearcookies")
+    @commands.is_owner()
+    async def vdl_clearcookies(self, ctx: commands.Context):
+        """(Bot owner only) Clear the configured cookies file."""
+        await self.config.cookies_file.set("")
+        await ctx.send("✅ Cookies file cleared.")
 
     # ──────────────────────────────────────────────
     # Listener
@@ -216,6 +256,7 @@ class VideoDownloader(commands.Cog):
                 url,
                 max_bytes,
                 global_cfg.get("ffmpeg_location", ""),
+                global_cfg.get("cookies_file", ""),
             )
         except FileTooLargeError:
             raise
@@ -286,6 +327,7 @@ class VideoDownloader(commands.Cog):
         url: str,
         max_bytes: int,
         ffmpeg_location: str = "",
+        cookies_file: str = "",
     ) -> tuple[str, str]:
         """Synchronous yt-dlp download. Returns (filepath, title)."""
         tmp_dir = tempfile.mkdtemp()
@@ -313,6 +355,9 @@ class VideoDownloader(commands.Cog):
 
         if ffmpeg_location and os.path.isfile(ffmpeg_location):
             ydl_opts["ffmpeg_location"] = str(Path(ffmpeg_location).parent)
+
+        if cookies_file and os.path.isfile(cookies_file):
+            ydl_opts["cookiefile"] = cookies_file
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
