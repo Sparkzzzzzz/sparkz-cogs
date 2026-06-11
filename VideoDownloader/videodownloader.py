@@ -11,13 +11,15 @@ from pathlib import Path
 
 # Regex to detect Instagram, Twitter/X, and TikTok links
 LINK_PATTERN = re.compile(
-    r"https?://(www\.|vm\.|vt\.|m\.)?(instagram\.com/(reel|p|tv)/|twitter\.com/\S+/status/|x\.com/\S+/status/|tiktok\.com/\S+|tiktok\.com/t/\S+)\S+",
+    r"https?://(www\.|vm\.|vt\.|m\.)?(instagram\.com/(reel|p|tv)/|twitter\.com/\S+/status/|x\.com/\S+/status/|tiktok\.com/\S+|tiktok\.com/t/\S+)\S*",
     re.IGNORECASE,
 )
 
+TIKWM_API = "https://www.tikwm.com/api/"
+
 
 class VideoDownloader(commands.Cog):
-    """Auto-downloads and reposts videos from Instagram and Twitter/X links."""
+    """Auto-downloads and reposts videos from Instagram, Twitter/X, and TikTok links."""
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -146,6 +148,11 @@ class VideoDownloader(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="TikTok Method",
+            value="tikwm.com API (no key required)",
+            inline=False,
+        )
+        embed.add_field(
             name="Cookies File",
             value=(
                 f"`{global_cfg['cookies_file']}`"
@@ -159,10 +166,7 @@ class VideoDownloader(commands.Cog):
     @vdl.command(name="setffmpeg")
     @commands.is_owner()
     async def vdl_setffmpeg(self, ctx: commands.Context, path: str):
-        """(Bot owner only) Set the path to ffmpeg if it's not in your system PATH.
-
-        Example: [p]vdl setffmpeg C:\\ffmpeg\\bin\\ffmpeg.exe
-        """
+        """(Bot owner only) Set the path to ffmpeg if it's not in your system PATH."""
         if not os.path.isfile(path):
             return await ctx.send(f"❌ File not found: `{path}`")
         await self.config.ffmpeg_location.set(path)
@@ -171,10 +175,7 @@ class VideoDownloader(commands.Cog):
     @vdl.command(name="setrapidapi")
     @commands.is_owner()
     async def vdl_setrapidapi(self, ctx: commands.Context, key: str):
-        """(Bot owner only) Set a RapidAPI key used as fallback if yt-dlp fails.
-
-        Get a free key at https://rapidapi.com — search for 'instagram downloader'.
-        """
+        """(Bot owner only) Set a RapidAPI key used as fallback if yt-dlp fails for Instagram."""
         await self.config.rapidapi_key.set(key)
         await ctx.send(
             "✅ RapidAPI key saved. It will be used as a fallback if yt-dlp fails."
@@ -183,13 +184,7 @@ class VideoDownloader(commands.Cog):
     @vdl.command(name="setcookies")
     @commands.is_owner()
     async def vdl_setcookies(self, ctx: commands.Context, path: str):
-        """(Bot owner only) Set the path to a Netscape-format cookies.txt file for Instagram.
-
-        Example: [p]vdl setcookies /home/ubuntu/RedBot/instaburnerlogin.txt
-
-        Export cookies using a browser extension like "Get cookies.txt LOCALLY"
-        while logged into a (preferably burner) Instagram account.
-        """
+        """(Bot owner only) Set the path to a Netscape-format cookies.txt file for Instagram."""
         if not os.path.isfile(path):
             return await ctx.send(f"❌ File not found: `{path}`")
         await self.config.cookies_file.set(path)
@@ -208,7 +203,6 @@ class VideoDownloader(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignore bots and DMs
         if message.author.bot or not message.guild:
             return
 
@@ -217,21 +211,17 @@ class VideoDownloader(commands.Cog):
         if not cfg["enabled"]:
             return
 
-        # Check channel filter
         watched = cfg["enabled_channels"]
         if watched and message.channel.id not in watched:
             return
 
-        # Find a matching link
         match = LINK_PATTERN.search(message.content)
         if not match:
             return
 
         url = match.group(0)
-
         global_cfg = await self.config.all()
 
-        # Fire and forget — don't await so the response feels instant
         asyncio.create_task(self._handle_video(message, url, cfg, global_cfg))
 
     # ──────────────────────────────────────────────
@@ -243,39 +233,66 @@ class VideoDownloader(commands.Cog):
     ):
         max_bytes = cfg["max_filesize_mb"] * 1024 * 1024
         is_instagram = "instagram.com" in url
+        is_tiktok = "tiktok.com" in url
 
         video_path = None
         title = "Video"
         last_error = None
 
-        # ── Strategy 1: yt-dlp direct (works for both Instagram and Twitter/X) ──
         try:
-            video_path, title = await asyncio.get_event_loop().run_in_executor(
-                None,
-                self._download_video,
-                url,
-                max_bytes,
-                global_cfg.get("ffmpeg_location", ""),
-                global_cfg.get("cookies_file", ""),
-            )
-        except FileTooLargeError:
-            raise
-        except Exception as e:
-            last_error = e
-            video_path = None
+            if is_tiktok:
+                # ── TikTok: always use tikwm.com API ──
+                try:
+                    tmp_dir = tempfile.mkdtemp()
+                    video_path, title = await self._download_via_tikwm(
+                        url, tmp_dir, max_bytes
+                    )
+                except FileTooLargeError:
+                    raise
+                except Exception as e:
+                    last_error = e
+                    video_path = None
+            else:
+                # ── Strategy 1: yt-dlp direct (Instagram / Twitter / X) ──
+                try:
+                    video_path, title = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self._download_video,
+                        url,
+                        max_bytes,
+                        global_cfg.get("ffmpeg_location", ""),
+                        global_cfg.get("cookies_file", ""),
+                    )
+                except FileTooLargeError:
+                    raise
+                except Exception as e:
+                    last_error = e
+                    video_path = None
 
-        # ── Strategy 2: RapidAPI fallback (Instagram only) ──
-        if video_path is None and is_instagram and global_cfg.get("rapidapi_key"):
-            try:
-                tmp_dir = tempfile.mkdtemp()
-                video_path, title = await self._download_via_rapidapi(
-                    url, tmp_dir, global_cfg["rapidapi_key"], max_bytes
-                )
-            except FileTooLargeError:
-                raise
-            except Exception as e:
-                last_error = e
-                video_path = None
+                # ── Strategy 2: RapidAPI fallback (Instagram only) ──
+                if (
+                    video_path is None
+                    and is_instagram
+                    and global_cfg.get("rapidapi_key")
+                ):
+                    try:
+                        tmp_dir = tempfile.mkdtemp()
+                        video_path, title = await self._download_via_rapidapi(
+                            url, tmp_dir, global_cfg["rapidapi_key"], max_bytes
+                        )
+                    except FileTooLargeError:
+                        raise
+                    except Exception as e:
+                        last_error = e
+                        video_path = None
+
+        except FileTooLargeError as e:
+            await message.reply(
+                f"⚠️ Video is too large to upload ({e.size_mb:.1f} MB > {cfg['max_filesize_mb']} MB).",
+                delete_after=15,
+                mention_author=False,
+            )
+            return
 
         # ── All strategies failed ──
         if video_path is None:
@@ -366,6 +383,62 @@ class VideoDownloader(commands.Cog):
             if not files:
                 raise RuntimeError("yt-dlp ran but no file was saved.")
             return str(files[0]), title
+
+    async def _download_via_tikwm(
+        self,
+        url: str,
+        tmp_dir: str,
+        max_bytes: int,
+    ) -> tuple[str, str]:
+        """Download TikTok video via tikwm.com API (no watermark). Returns (filepath, title)."""
+        async with aiohttp.ClientSession() as session:
+            # tikwm accepts short URLs directly — no need to expand first
+            async with session.get(
+                TIKWM_API,
+                params={"url": url, "hd": 1},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"tikwm API returned HTTP {resp.status}")
+                data = await resp.json(content_type=None)
+
+            if data.get("code") != 0:
+                raise RuntimeError(
+                    f"tikwm API error {data.get('code')}: {data.get('msg', 'unknown error')}"
+                )
+
+            video_data = data.get("data", {})
+            # Prefer HD play URL, fall back to standard play URL
+            video_url = video_data.get("hdplay") or video_data.get("play")
+            if not video_url:
+                raise RuntimeError(f"tikwm returned no video URL. Response: {data}")
+
+            title = (video_data.get("title") or "TikTok Video")[:100]
+
+            async with session.get(
+                video_url,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as video_resp:
+                if video_resp.status != 200:
+                    raise RuntimeError(
+                        f"Failed to fetch TikTok video stream: HTTP {video_resp.status}"
+                    )
+
+                content_length = int(video_resp.headers.get("Content-Length", 0))
+                if content_length and content_length > max_bytes:
+                    raise FileTooLargeError(content_length / (1024 * 1024))
+
+                filename = os.path.join(tmp_dir, "tiktok_video.mp4")
+                with open(filename, "wb") as f:
+                    f.write(await video_resp.read())
+
+        actual_size = os.path.getsize(filename)
+        if actual_size > max_bytes:
+            raise FileTooLargeError(actual_size / (1024 * 1024))
+
+        return filename, title
 
     async def _download_via_rapidapi(
         self,
