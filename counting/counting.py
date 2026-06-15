@@ -11,13 +11,13 @@ log = logging.getLogger("red.counting")
 
 # Safe math evaluation — allows numbers, basic operators, AND named math functions
 SAFE_MATH_PATTERN = re.compile(
-    r'^[\d\s\+\-\*\/\(\)\.\%]+'
-    r'|^(sqrt|floor|ceil|pow|abs|round)\s*\([\d\s\+\-\*\/\(\)\.\%\,]+\)$'
+    r"^[\d\s\+\-\*\/\(\)\.\%]+"
+    r"|^(sqrt|floor|ceil|pow|abs|round)\s*\([\d\s\+\-\*\/\(\)\.\%\,]+\)$"
 )
 
 # Full pattern that permits math function calls mixed with expressions
 SAFE_MATH_FULL = re.compile(
-    r'^[\d\s\+\-\*\/\(\)\.\%]*((?:sqrt|floor|ceil|pow|abs|round)\s*\([\d\s\+\-\*\/\(\)\.\%\,]*\)[\s\+\-\*\/\(\)\.\%\d]*)*$'
+    r"^[\d\s\+\-\*\/\(\)\.\%]*((?:sqrt|floor|ceil|pow|abs|round)\s*\([\d\s\+\-\*\/\(\)\.\%\,]*\)[\s\+\-\*\/\(\)\.\%\d]*)*$"
 )
 
 
@@ -26,24 +26,30 @@ def safe_eval(expr: str) -> Optional[float]:
     expr = expr.strip()
 
     # Allow expressions containing only digits, operators, parens, decimals, and math functions
-    allowed = re.compile(
-        r'^[\d\s\+\-\*\/\(\)\.\%]|sqrt|floor|ceil|pow|abs|round'
-    )
+    allowed = re.compile(r"^[\d\s\+\-\*\/\(\)\.\%]|sqrt|floor|ceil|pow|abs|round")
     # Whitelist: only these characters and function names are permitted
-    sanitized = re.sub(r'(sqrt|floor|ceil|pow|abs|round)', '', expr)
-    if not re.match(r'^[\d\s\+\-\*\/\(\)\.\%,]*$', sanitized):
+    sanitized = re.sub(r"(sqrt|floor|ceil|pow|abs|round)", "", expr)
+    if not re.match(r"^[\d\s\+\-\*\/\(\)\.\%,]*$", sanitized):
         return None
 
     try:
-        result = eval(expr, {"__builtins__": {}}, {
-            "abs": abs,
-            "round": round,
-            "pow": pow,
-            "sqrt": math.sqrt,
-            "floor": math.floor,
-            "ceil": math.ceil,
-        })
-        if isinstance(result, (int, float)) and not math.isinf(result) and not math.isnan(result):
+        result = eval(
+            expr,
+            {"__builtins__": {}},
+            {
+                "abs": abs,
+                "round": round,
+                "pow": pow,
+                "sqrt": math.sqrt,
+                "floor": math.floor,
+                "ceil": math.ceil,
+            },
+        )
+        if (
+            isinstance(result, (int, float))
+            and not math.isinf(result)
+            and not math.isnan(result)
+        ):
             return float(result)
     except Exception:
         pass
@@ -55,7 +61,9 @@ class Counting(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=0xC0UN71NG, force_registration=True)
+        self.config = Config.get_conf(
+            self, identifier=0xC0C0C0, force_registration=True
+        )
 
         default_guild = {
             "channel_id": None,
@@ -66,8 +74,8 @@ class Counting(commands.Cog):
             "tick_reaction": "✅",
             "wrong_reaction": "❌",
             # Persistent reset confirmation state
-            "pending_reset": False,          # True while awaiting confirmation
-            "pending_reset_msg_id": None,    # Message ID of the confirmation prompt
+            "pending_reset": False,  # True while awaiting confirmation
+            "pending_reset_msg_id": None,  # Message ID of the confirmation prompt
         }
         self.config.register_guild(**default_guild)
 
@@ -158,11 +166,15 @@ class Counting(commands.Cog):
             )
 
         try:
-            reaction, _ = await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
+            reaction, _ = await self.bot.wait_for(
+                "reaction_add", timeout=30.0, check=check
+            )
             if str(reaction.emoji) == "✅":
                 await self._reset_count(guild)
                 start = await cfg.start_number()
-                await confirm_msg.edit(content=f"✅ Count has been reset to **{start}**.")
+                await confirm_msg.edit(
+                    content=f"✅ Count has been reset to **{start}**."
+                )
             else:
                 await confirm_msg.edit(content="❌ Reset cancelled.")
         except asyncio.TimeoutError:
@@ -266,7 +278,9 @@ class Counting(commands.Cog):
 
     @counting_group.command(name="enable")
     @checks.admin_or_permissions(manage_guild=True)
-    async def counting_enable(self, ctx: commands.Context, channel: discord.TextChannel = None):
+    async def counting_enable(
+        self, ctx: commands.Context, channel: discord.TextChannel = None
+    ):
         """Enable counting in a channel.
 
         If no channel is provided, uses the current channel.
@@ -280,7 +294,9 @@ class Counting(commands.Cog):
         start = await cfg.start_number()
         await cfg.current_count.set(start)
         await cfg.last_user_id.set(None)
-        await ctx.send(f"✅ Counting enabled in {channel.mention}. Start counting from **{start + 1}**!")
+        await ctx.send(
+            f"✅ Counting enabled in {channel.mention}. Start counting from **{start + 1}**!"
+        )
 
     @counting_group.command(name="disable")
     @checks.admin_or_permissions(manage_guild=True)
@@ -318,9 +334,7 @@ class Counting(commands.Cog):
         await cfg.pending_reset.set(True)
         await cfg.pending_reset_msg_id.set(confirm_msg.id)
 
-        task = asyncio.create_task(
-            self._wait_for_reset_confirm(ctx.guild, confirm_msg)
-        )
+        task = asyncio.create_task(self._wait_for_reset_confirm(ctx.guild, confirm_msg))
         self._pending_resets[guild_id] = task
 
     # ---- setstart ------------------------------------------------------
@@ -348,7 +362,9 @@ class Counting(commands.Cog):
 
     @counting_group.command(name="setreaction")
     @checks.admin_or_permissions(manage_guild=True)
-    async def counting_setreaction(self, ctx: commands.Context, reaction_type: str, emoji: str):
+    async def counting_setreaction(
+        self, ctx: commands.Context, reaction_type: str, emoji: str
+    ):
         """Set the reaction emoji for correct or wrong counts.
 
         `reaction_type` must be `tick` (correct) or `wrong` (incorrect).
@@ -401,7 +417,9 @@ class Counting(commands.Cog):
             title="🔢 Counting Status",
             color=discord.Color.blurple() if enabled else discord.Color.red(),
         )
-        embed.add_field(name="Status", value="✅ Enabled" if enabled else "🛑 Disabled", inline=True)
+        embed.add_field(
+            name="Status", value="✅ Enabled" if enabled else "🛑 Disabled", inline=True
+        )
         embed.add_field(name="Channel", value=channel_mention, inline=True)
         embed.add_field(name="Current Count", value=str(current), inline=True)
         embed.add_field(name="Next Expected", value=str(current + 1), inline=True)
@@ -410,6 +428,8 @@ class Counting(commands.Cog):
         embed.add_field(name="Correct Reaction", value=tick, inline=True)
         embed.add_field(name="Wrong Reaction", value=wrong, inline=True)
         if pending:
-            embed.add_field(name="⚠️ Pending Reset", value="Awaiting confirmation", inline=False)
+            embed.add_field(
+                name="⚠️ Pending Reset", value="Awaiting confirmation", inline=False
+            )
 
         await ctx.send(embed=embed)
